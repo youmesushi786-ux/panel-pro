@@ -83,9 +83,19 @@ export function StepResults({
     // Board outline
     ctx.strokeStyle = '#1f2937';
     ctx.lineWidth = 3;
-    ctx.strokeRect(offsetX, offsetY, layout.board_width * scale, layout.board_length * scale);
+    ctx.strokeRect(
+      offsetX,
+      offsetY,
+      layout.board_width * scale,
+      layout.board_length * scale,
+    );
     ctx.fillStyle = '#f9fafb';
-    ctx.fillRect(offsetX, offsetY, layout.board_width * scale, layout.board_length * scale);
+    ctx.fillRect(
+      offsetX,
+      offsetY,
+      layout.board_width * scale,
+      layout.board_length * scale,
+    );
 
     // Panels
     layout.panels.forEach((panel) => {
@@ -346,6 +356,13 @@ export function StepResults({
     tax_amount: rawPricing.tax_amount ?? 0,
     total: rawPricing.total ?? 0,
   };
+
+  // Normalized tax rate display:
+  // - If backend sends 0.16, we show 16%
+  // - If backend sends 16, we also show 16%
+  const rawTaxRate = Number(pricing.tax_rate ?? 0);
+  const displayTaxRatePercent =
+    rawTaxRate > 1 ? rawTaxRate : rawTaxRate * 100;
   // ------------------------------------------------------------------------
 
   return (
@@ -695,8 +712,7 @@ export function StepResults({
               </div>
               <div className="flex justify-between">
                 <span>
-                  {pricing.tax_name} (
-                  {((pricing.tax_rate ?? 0) * 100).toFixed(0)}%):
+                  {pricing.tax_name} ({displayTaxRatePercent.toFixed(0)}%):
                 </span>
                 <span className="font-semibold">
                   {pricing.tax_amount.toLocaleString()}
