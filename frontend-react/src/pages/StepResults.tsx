@@ -176,14 +176,39 @@ export function StepResults({
   const handlePayment = async () => {
     if (!mpesaPhone || !results) return;
 
-    // DEMO: always succeed, unlock layouts, do not call real M‑Pesa
+    // DEMO: simulate a successful payment, but still call backend
+    // notifyAfterPayment so invoices/BOQ are actually generated and sent.
     if (DEMO_PAYMENT_MODE) {
       const demoOrderId = 'DEMO_' + Date.now();
       setOrderId(demoOrderId);
-      setPaymentStatus('paid');
-      setHasPaid(true);
-      setReceiptNumber('DEMO-RECEIPT');
-      setPaymentMessage('Demo payment successful. Layouts unlocked for testing.');
+      setPaymentStatus('processing');
+      setPaymentMessage(
+        'Simulated payment... sending test invoice and BOQ via backend.',
+      );
+
+      try {
+        await api.notifyAfterPayment({
+          order_id: demoOrderId,
+          project_name: projectName,
+          customer_name: customerName,
+          customer_email: customerEmail,
+          customer_phone: customerPhone,
+        });
+
+        setPaymentStatus('paid');
+        setHasPaid(true);
+        setReceiptNumber('DEMO-RECEIPT');
+        setPaymentMessage(
+          'Demo payment successful. Test invoice and BOQ have been sent.',
+        );
+      } catch (error) {
+        console.error('notifyAfterPayment failed in demo mode:', error);
+        setPaymentStatus('failed');
+        setPaymentMessage(
+          'Demo payment failed: could not trigger after-payment notifications.',
+        );
+      }
+
       return;
     }
 
@@ -286,6 +311,38 @@ export function StepResults({
   }
 
   const layout = results.layouts[currentSheetIndex];
+
+  // Per‑sheet used/waste areas (backend: used_area_mm2 / waste_area_mm2)
+  const usedAreaMm2 =
+    ((layout as any).used_area_mm2 ??
+      (layout as any).used_area ??
+      0) as number;
+  const wasteAreaMm2 =
+    ((layout as any).waste_area_mm2 ??
+      (layout as any).waste_area ??
+      0) as number;
+  const boardTotalAreaMm2 = usedAreaMm2 + wasteAreaMm2;
+  const boardWastePercent =
+    boardTotalAreaMm2 > 0
+      ? (wasteAreaMm2 / boardTotalAreaMm2) * 100
+      : 0;
+
+  // Global used/waste areas
+  const totalUsedAreaMm2 = results.layouts.reduce(
+    (sum, b) =>
+      sum +
+      (((b as any).used_area_mm2 ?? (b as any).used_area ?? 0) as number),
+    0,
+  );
+  const totalWasteAreaMm2 =
+    ((results.optimization as any).total_waste_mm2 ??
+      (results.optimization as any).total_waste_area ??
+      0) as number;
+
+  const totalBoardsUsed =
+    ((results.optimization as any).total_boards_used ??
+      (results.optimization as any).total_boards ??
+      results.layouts.length) as number;
 
   // ----------------- NORMALIZE BACKEND BOQ & PRICING SHAPE -----------------
   const rawBoq: any = (results as any).boq ?? {};
@@ -478,19 +535,14 @@ export function StepResults({
                     <div className="bg-green-50 p-3 rounded">
                       <p className="text-green-700">Used Area</p>
                       <p className="font-semibold">
-                        {(layout.used_area / 1_000_000).toFixed(2)} m²
+                        {(usedAreaMm2 / 1_000_000).toFixed(2)} m²
                       </p>
                     </div>
                     <div className="bg-red-50 p-3 rounded">
                       <p className="text-red-700">Waste Area</p>
                       <p className="font-semibold">
-                        {(layout.waste_area / 1_000_000).toFixed(2)} m² (
-                        {(
-                          (layout.waste_area /
-                            (layout.used_area + layout.waste_area || 1)) *
-                          100
-                        ).toFixed(1)}
-                        %)
+                        {(wasteAreaMm2 / 1_000_000).toFixed(2)} m² (
+                        {boardWastePercent.toFixed(1)}%)
                       </p>
                     </div>
                   </div>
@@ -519,7 +571,7 @@ export function StepResults({
                         </div>
                         <div>
                           <span className="text-gray-600">Rotated:</span>{' '}
-                          <strong>{hoveredPanel.rotated ? 'Yes' : 'No'}</strong>
+                          <strong>{(hoveredPanel as any).rotated ? 'Yes' : 'No'}</strong>
                         </div>
                       </div>
                     </div>
@@ -533,7 +585,7 @@ export function StepResults({
                   <div className="bg-gray-50 p-3 rounded">
                     <p className="text-gray-600">Total Boards Used</p>
                     <p className="text-xl font-bold text-gray-900">
-                      {results.optimization.total_boards_used}
+                      {totalBoardsUsed}
                     </p>
                   </div>
                   <div className="bg-gray-50 p-3 rounded">
@@ -545,19 +597,13 @@ export function StepResults({
                   <div className="bg-green-50 p-3 rounded">
                     <p className="text-green-700">Used Area</p>
                     <p className="text-xl font-bold text-green-900">
-                      {(
-                        results.optimization.total_used_area / 1_000_000
-                      ).toFixed(2)}{' '}
-                      m²
+                      {(totalUsedAreaMm2 / 1_000_000).toFixed(2)} m²
                     </p>
                   </div>
                   <div className="bg-red-50 p-3 rounded">
                     <p className="text-red-700">Waste Area</p>
                     <p className="text-xl font-bold text-red-900">
-                      {(
-                        results.optimization.total_waste_area / 1_000_000
-                      ).toFixed(2)}{' '}
-                      m²
+                      {(totalWasteAreaMm2 / 1_000_000).toFixed(2)} m²
                     </p>
                   </div>
                   <div className="bg-gray-50 p-3 rounded">
@@ -595,8 +641,10 @@ export function StepResults({
                 </thead>
                 <tbody>
                   {boqItems.map((item) => (
-                    <tr key={item.item_number} className="border-b">
-                      <td className="px-3 py-2">{item.item_number}</td>
+                    <tr key={item.item_no ?? item.item_number} className="border-b">
+                      <td className="px-3 py-2">
+                        {item.item_no ?? item.item_number}
+                      </td>
                       <td className="px-3 py-2">{item.description}</td>
                       <td className="px-3 py-2">{item.size}</td>
                       <td className="px-3 py-2 text-right">{item.quantity}</td>
