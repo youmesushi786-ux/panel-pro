@@ -13,6 +13,10 @@ import { Input } from '../components/ui/Input';
 import type { CuttingResponse, PlacedPanel } from '../types';
 import { api } from '../api/client';
 
+// Demo flag: when true, payment always succeeds on the frontend
+// and unlocks the layouts without calling real M‑Pesa.
+const DEMO_PAYMENT_MODE = true;
+
 interface StepResultsProps {
   results: CuttingResponse | null;
   onBack: () => void;
@@ -40,6 +44,7 @@ export function StepResults({
   >('idle');
   const [paymentMessage, setPaymentMessage] = useState('');
   const [receiptNumber, setReceiptNumber] = useState('');
+  const [hasPaid, setHasPaid] = useState(false); // controls access to layouts & optimization
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pollIntervalRef = useRef<number | null>(null);
@@ -47,13 +52,13 @@ export function StepResults({
 
   // Re-draw whenever layout‑related state changes
   useEffect(() => {
-    if (results && canvasRef.current) {
+    if (results && canvasRef.current && hasPaid) {
       drawLayout();
     }
-  }, [currentSheetIndex, zoom, hoveredPanel, results]);
+  }, [currentSheetIndex, zoom, hoveredPanel, results, hasPaid]);
 
   const drawLayout = () => {
-    if (!results || !canvasRef.current) return;
+    if (!results || !canvasRef.current || !hasPaid) return;
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -118,7 +123,7 @@ export function StepResults({
   };
 
   const handleCanvasHover = (e: MouseEvent<HTMLCanvasElement>) => {
-    if (!results || !canvasRef.current) return;
+    if (!results || !canvasRef.current || !hasPaid) return;
 
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
@@ -161,6 +166,18 @@ export function StepResults({
   const handlePayment = async () => {
     if (!mpesaPhone || !results) return;
 
+    // DEMO: always succeed, unlock layouts, do not call real M‑Pesa
+    if (DEMO_PAYMENT_MODE) {
+      const demoOrderId = 'DEMO_' + Date.now();
+      setOrderId(demoOrderId);
+      setPaymentStatus('paid');
+      setHasPaid(true);
+      setReceiptNumber('DEMO-RECEIPT');
+      setPaymentMessage('Demo payment successful. Layouts unlocked for testing.');
+      return;
+    }
+
+    // REAL FLOW (for production, if you disable demo mode)
     try {
       setPaymentStatus('processing');
       setPaymentMessage('Creating order...');
@@ -188,6 +205,7 @@ export function StepResults({
 
           if (status.status === 'paid') {
             setPaymentStatus('paid');
+            setHasPaid(true); // unlock layouts after real payment
             setReceiptNumber(status.mpesa_receipt || '');
             setPaymentMessage('Payment successful!');
 
@@ -337,7 +355,7 @@ export function StepResults({
           Optimization Results
         </h2>
         <p className="text-gray-600">
-          Review cutting layout, bill of quantities, and complete payment
+          Review bill of quantities and complete payment to unlock cutting layouts
         </p>
       </div>
 
@@ -345,188 +363,204 @@ export function StepResults({
       <div className="grid grid-cols-1 xl:grid-cols-[2fr,1fr] gap-6">
         {/* LEFT / CENTER COLUMN */}
         <div className="space-y-6">
-          {/* Layout visualization */}
-          <Card title="Layout Visualization" hover>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      setCurrentSheetIndex(Math.max(0, currentSheetIndex - 1))
-                    }
-                    disabled={currentSheetIndex === 0}
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </Button>
-                  <span className="text-sm font-medium">
-                    Sheet {currentSheetIndex + 1} / {results.layouts.length}
-                  </span>
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      setCurrentSheetIndex(
-                        Math.min(
-                          results.layouts.length - 1,
-                          currentSheetIndex + 1,
-                        ),
-                      )
-                    }
-                    disabled={currentSheetIndex === results.layouts.length - 1}
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </Button>
-                </div>
+          {/* If not paid yet, show info instead of layouts */}
+          {!hasPaid && (
+            <Card title="Layouts & Optimization" hover>
+              <p className="text-sm text-gray-700">
+                Cutting layouts and optimization statistics are locked until payment is completed.
+                Please review the bill of quantities and complete the payment on the right to
+                unlock the full cutting plan and board layouts.
+              </p>
+            </Card>
+          )}
 
-                <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setZoom(Math.max(0.5, zoom - 0.1))}
-                  >
-                    <ZoomOut className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setZoom(1)}
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setZoom(Math.min(2, zoom + 0.1))}
-                  >
-                    <ZoomIn className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-
-              <canvas
-                ref={canvasRef}
-                width={800}
-                height={500}
-                onMouseMove={handleCanvasHover}
-                onMouseLeave={() => setHoveredPanel(null)}
-                className="w-full border border-gray-200 rounded-lg bg-white cursor-crosshair"
-              />
-
-              {/* Board + panel stats for current sheet */}
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div className="bg-gray-50 p-3 rounded">
-                  <p className="text-gray-600">Board Size</p>
-                  <p className="font-semibold">
-                    {layout.board_width} × {layout.board_length} mm
-                  </p>
-                </div>
-                <div className="bg-gray-50 p-3 rounded">
-                  <p className="text-gray-600">Panels on Sheet</p>
-                  <p className="font-semibold">
-                    {layout.panels.length} pieces
-                  </p>
-                </div>
-                <div className="bg-green-50 p-3 rounded">
-                  <p className="text-green-700">Used Area</p>
-                  <p className="font-semibold">
-                    {(layout.used_area / 1_000_000).toFixed(2)} m²
-                  </p>
-                </div>
-                <div className="bg-red-50 p-3 rounded">
-                  <p className="text-red-700">Waste Area</p>
-                  <p className="font-semibold">
-                    {(layout.waste_area / 1_000_000).toFixed(2)} m² (
-                    {(
-                      (layout.waste_area /
-                        (layout.used_area + layout.waste_area || 1)) *
-                      100
-                    ).toFixed(1)}
-                    %)
-                  </p>
-                </div>
-              </div>
-
-              {hoveredPanel && (
-                <div className="bg-orange-50 border border-orange-200 p-4 rounded-lg">
-                  <h4 className="font-semibold text-orange-900 mb-2">
-                    Hovered Panel
-                  </h4>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <span className="text-gray-600">Label:</span>{' '}
-                      <strong>{hoveredPanel.label}</strong>
+          {/* Layout visualization & global stats only after payment */}
+          {hasPaid && (
+            <>
+              {/* Layout visualization */}
+              <Card title="Layout Visualization" hover>
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() =>
+                          setCurrentSheetIndex(Math.max(0, currentSheetIndex - 1))
+                        }
+                        disabled={currentSheetIndex === 0}
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </Button>
+                      <span className="text-sm font-medium">
+                        Sheet {currentSheetIndex + 1} / {results.layouts.length}
+                      </span>
+                      <Button
+                        size="sm"
+                        onClick={() =>
+                          setCurrentSheetIndex(
+                            Math.min(
+                              results.layouts.length - 1,
+                              currentSheetIndex + 1,
+                            ),
+                          )
+                        }
+                        disabled={currentSheetIndex === results.layouts.length - 1}
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </Button>
                     </div>
-                    <div>
-                      <span className="text-gray-600">Size:</span>{' '}
-                      <strong>
-                        {hoveredPanel.width} × {hoveredPanel.length}mm
-                      </strong>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Position:</span>{' '}
-                      <strong>
-                        ({hoveredPanel.x}, {hoveredPanel.y})
-                      </strong>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Rotated:</span>{' '}
-                      <strong>{hoveredPanel.rotated ? 'Yes' : 'No'}</strong>
+
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setZoom(Math.max(0.5, zoom - 0.1))}
+                      >
+                        <ZoomOut className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setZoom(1)}
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setZoom(Math.min(2, zoom + 0.1))}
+                      >
+                        <ZoomIn className="w-4 h-4" />
+                      </Button>
                     </div>
                   </div>
+
+                  <canvas
+                    ref={canvasRef}
+                    width={800}
+                    height={500}
+                    onMouseMove={handleCanvasHover}
+                    onMouseLeave={() => setHoveredPanel(null)}
+                    className="w-full border border-gray-200 rounded-lg bg-white cursor-crosshair"
+                  />
+
+                  {/* Board + panel stats for current sheet */}
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div className="bg-gray-50 p-3 rounded">
+                      <p className="text-gray-600">Board Size</p>
+                      <p className="font-semibold">
+                        {layout.board_width} × {layout.board_length} mm
+                      </p>
+                    </div>
+                    <div className="bg-gray-50 p-3 rounded">
+                      <p className="text-gray-600">Panels on Sheet</p>
+                      <p className="font-semibold">
+                        {layout.panels.length} pieces
+                      </p>
+                    </div>
+                    <div className="bg-green-50 p-3 rounded">
+                      <p className="text-green-700">Used Area</p>
+                      <p className="font-semibold">
+                        {(layout.used_area / 1_000_000).toFixed(2)} m²
+                      </p>
+                    </div>
+                    <div className="bg-red-50 p-3 rounded">
+                      <p className="text-red-700">Waste Area</p>
+                      <p className="font-semibold">
+                        {(layout.waste_area / 1_000_000).toFixed(2)} m² (
+                        {(
+                          (layout.waste_area /
+                            (layout.used_area + layout.waste_area || 1)) *
+                          100
+                        ).toFixed(1)}
+                        %)
+                      </p>
+                    </div>
+                  </div>
+
+                  {hoveredPanel && (
+                    <div className="bg-orange-50 border border-orange-200 p-4 rounded-lg">
+                      <h4 className="font-semibold text-orange-900 mb-2">
+                        Hovered Panel
+                      </h4>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <span className="text-gray-600">Label:</span>{' '}
+                          <strong>{hoveredPanel.label}</strong>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Size:</span>{' '}
+                          <strong>
+                            {hoveredPanel.width} × {hoveredPanel.length}mm
+                          </strong>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Position:</span>{' '}
+                          <strong>
+                            ({hoveredPanel.x}, {hoveredPanel.y})
+                          </strong>
+                        </div>
+                        <div>
+                          <span className="text-gray-600">Rotated:</span>{' '}
+                          <strong>{hoveredPanel.rotated ? 'Yes' : 'No'}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </Card>
+              </Card>
 
-          {/* Global statistics */}
-          <Card title="Global Statistics" hover>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div className="bg-gray-50 p-3 rounded">
-                <p className="text-gray-600">Total Boards Used</p>
-                <p className="text-xl font-bold text-gray-900">
-                  {results.optimization.total_boards_used}
-                </p>
-              </div>
-              <div className="bg-gray-50 p-3 rounded">
-                <p className="text-gray-600">Total Panels</p>
-                <p className="text-xl font-bold text-gray-900">
-                  {results.optimization.total_panels}
-                </p>
-              </div>
-              <div className="bg-green-50 p-3 rounded">
-                <p className="text-green-700">Used Area</p>
-                <p className="text-xl font-bold text-green-900">
-                  {(
-                    results.optimization.total_used_area / 1_000_000
-                  ).toFixed(2)}{' '}
-                  m²
-                </p>
-              </div>
-              <div className="bg-red-50 p-3 rounded">
-                <p className="text-red-700">Waste Area</p>
-                <p className="text-xl font-bold text-red-900">
-                  {(
-                    results.optimization.total_waste_area / 1_000_000
-                  ).toFixed(2)}{' '}
-                  m²
-                </p>
-              </div>
-              <div className="bg-gray-50 p-3 rounded">
-                <p className="text-gray-600">Total Cuts</p>
-                <p className="text-xl font-bold text-gray-900">
-                  {results.optimization.total_cuts}
-                </p>
-              </div>
-              <div className="bg-gray-50 p-3 rounded">
-                <p className="text-gray-600">Cut Length</p>
-                <p className="text-xl font-bold text-gray-900">
-                  {(results.optimization.total_cut_length / 1000).toFixed(2)}m
-                </p>
-              </div>
-            </div>
-          </Card>
+              {/* Global statistics */}
+              <Card title="Global Statistics" hover>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div className="bg-gray-50 p-3 rounded">
+                    <p className="text-gray-600">Total Boards Used</p>
+                    <p className="text-xl font-bold text-gray-900">
+                      {results.optimization.total_boards_used}
+                    </p>
+                  </div>
+                  <div className="bg-gray-50 p-3 rounded">
+                    <p className="text-gray-600">Total Panels</p>
+                    <p className="text-xl font-bold text-gray-900">
+                      {results.optimization.total_panels}
+                    </p>
+                  </div>
+                  <div className="bg-green-50 p-3 rounded">
+                    <p className="text-green-700">Used Area</p>
+                    <p className="text-xl font-bold text-green-900">
+                      {(
+                        results.optimization.total_used_area / 1_000_000
+                      ).toFixed(2)}{' '}
+                      m²
+                    </p>
+                  </div>
+                  <div className="bg-red-50 p-3 rounded">
+                    <p className="text-red-700">Waste Area</p>
+                    <p className="text-xl font-bold text-red-900">
+                      {(
+                        results.optimization.total_waste_area / 1_000_000
+                      ).toFixed(2)}{' '}
+                      m²
+                    </p>
+                  </div>
+                  <div className="bg-gray-50 p-3 rounded">
+                    <p className="text-gray-600">Total Cuts</p>
+                    <p className="text-xl font-bold text-gray-900">
+                      {results.optimization.total_cuts}
+                    </p>
+                  </div>
+                  <div className="bg-gray-50 p-3 rounded">
+                    <p className="text-gray-600">Cut Length</p>
+                    <p className="text-xl font-bold text-gray-900">
+                      {(results.optimization.total_cut_length / 1000).toFixed(2)}m
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            </>
+          )}
 
-          {/* BOQ TABLE */}
+          {/* BOQ TABLE (always visible) */}
           <Card title="Bill of Quantities" hover>
             <div className="overflow-x-auto">
               <table className="w-full text-xs border-collapse">
@@ -606,7 +640,7 @@ export function StepResults({
             </div>
           </Card>
 
-          {/* PRICING TABLE */}
+          {/* PRICING TABLE (always visible) */}
           <Card title="Pricing" hover>
             <div className="overflow-x-auto">
               <table className="w-full text-xs border-collapse">
@@ -682,7 +716,11 @@ export function StepResults({
             <div className="space-y-4">
               <div className="bg-green-50 border border-green-200 p-4 rounded text-center">
                 <p className="text-sm font-medium text-green-900">M-PESA</p>
-                <p className="text-xs text-green-700">Secure mobile payment</p>
+                <p className="text-xs text-green-700">
+                  {DEMO_PAYMENT_MODE
+                    ? 'Demo mode: no real charges. Use this to unlock layouts.'
+                    : 'Secure mobile payment'}
+                </p>
               </div>
 
               {paymentStatus === 'paid' ? (

@@ -46,7 +46,6 @@ export function StepPanels({
   onNext,
 }: StepPanelsProps) {
   const [catalog, setCatalog] = useState<BoardCatalog | null>(null);
-  const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
 
   const [currentPanel, setCurrentPanel] = useState({
@@ -67,7 +66,6 @@ export function StepPanels({
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    setCatalogLoading(true);
     api
       .getBoardCatalog()
       .then((data) => {
@@ -80,9 +78,6 @@ export function StepPanels({
         setCatalogError(
           err instanceof Error ? err.message : 'Failed to load board catalog'
         );
-      })
-      .finally(() => {
-        setCatalogLoading(false);
       });
   }, []);
 
@@ -162,35 +157,33 @@ export function StepPanels({
   );
   const totalPieces = panels.reduce((sum, p) => sum + p.quantity, 0);
 
-  // Safely derive the core map from the catalog
-  const coreMap: Record<
+  // Map structures derived from backend JSON
+  const coreMap = (catalog?.catalog ?? {}) as Record<
     string,
     { thicknesses?: number[]; companies?: string[] }
-  > =
-    catalog &&
-    catalog.catalog &&
-    typeof catalog.catalog === 'object' &&
-    !Array.isArray(catalog.catalog)
-      ? (catalog.catalog as any)
-      : {};
+  >;
+  const colorsByCompany = (catalog?.colors ?? {}) as Record<
+    string,
+    { code: string; name: string; hex: string }[]
+  >;
 
   const coreTypes = Object.keys(coreMap);
 
   const availableThicknesses =
     currentBoard.core_type && coreMap[currentBoard.core_type]
-      ? coreMap[currentBoard.core_type].thicknesses || []
+      ? coreMap[currentBoard.core_type].thicknesses ?? []
       : [];
 
   const availableCompanies =
     currentBoard.core_type &&
     currentBoard.thickness_mm &&
     coreMap[currentBoard.core_type]
-      ? coreMap[currentBoard.core_type].companies || []
+      ? coreMap[currentBoard.core_type].companies ?? []
       : [];
 
   const availableColors =
-    currentBoard.company && catalog && (catalog as any).colors
-      ? (catalog as any).colors[currentBoard.company] || []
+    currentBoard.company && colorsByCompany[currentBoard.company]
+      ? colorsByCompany[currentBoard.company]
       : [];
 
   return (
@@ -330,23 +323,15 @@ export function StepPanels({
                     />
                   ))}
 
-                  {catalogLoading && (
-                    <p className="text-xs text-gray-400">
-                      Loading board catalog...
-                    </p>
-                  )}
-
-                  {!catalogLoading &&
-                    !catalogError &&
-                    coreTypes.length === 0 && (
-                      <p className="text-xs text-gray-400">
-                        No board catalog data available.
-                      </p>
-                    )}
-
                   {catalogError && (
                     <p className="text-xs text-red-500">
                       Failed to load board catalog: {catalogError}
+                    </p>
+                  )}
+
+                  {!catalogError && coreTypes.length === 0 && (
+                    <p className="text-xs text-gray-400">
+                      No board catalog data available.
                     </p>
                   )}
                 </div>
@@ -401,7 +386,7 @@ export function StepPanels({
                     Color
                   </label>
                   <div className="flex flex-wrap gap-3">
-                    {availableColors.map((color: any) => (
+                    {availableColors.map((color) => (
                       <Chip
                         key={color.code}
                         label={`${color.code} - ${color.name}`}
