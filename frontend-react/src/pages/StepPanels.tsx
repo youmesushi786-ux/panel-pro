@@ -139,6 +139,9 @@ export function StepPanels({
     ? catalog.colors[currentBoard.company] || []
     : [];
 
+  // SAFE: core types list even if catalog or catalog.catalog is null/undefined
+  const coreTypes = Object.keys(catalog?.catalog ?? {});
+
   return (
     <div className="p-6 max-w-[1800px] mx-auto">
       <div className="mb-6">
@@ -203,8 +206,21 @@ export function StepPanels({
               />
               {currentPanel.width && currentPanel.length && (
                 <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded">
-                  Area per panel: <strong>{((Number(currentPanel.width) * Number(currentPanel.length)) / 1000000).toFixed(2)} m²</strong>
-                  {currentPanel.quantity && ` × ${currentPanel.quantity} = ${((Number(currentPanel.width) * Number(currentPanel.length) * Number(currentPanel.quantity)) / 1000000).toFixed(2)} m²`}
+                  Area per panel:{' '}
+                  <strong>
+                    {(
+                      (Number(currentPanel.width) * Number(currentPanel.length)) /
+                      1000000
+                    ).toFixed(2)}{' '}
+                    m²
+                  </strong>
+                  {currentPanel.quantity &&
+                    ` × ${currentPanel.quantity} = ${(
+                      (Number(currentPanel.width) *
+                        Number(currentPanel.length) *
+                        Number(currentPanel.quantity)) /
+                      1000000
+                    ).toFixed(2)} m²`}
                 </div>
               )}
             </div>
@@ -219,9 +235,11 @@ export function StepPanels({
 
             <div className="space-y-6">
               <div>
-                <label className="block text-xs font-medium text-gray-500 mb-2 uppercase">Core Type</label>
+                <label className="block text-xs font-medium text-gray-500 mb-2 uppercase">
+                  Core Type
+                </label>
                 <div className="flex flex-wrap gap-2">
-                  {catalog && Object.keys(catalog.catalog).map((core) => (
+                  {coreTypes.map((core) => (
                     <Chip
                       key={core}
                       label={core.replace('_', ' ').toUpperCase()}
@@ -229,19 +247,28 @@ export function StepPanels({
                       onClick={() => setCurrentBoard({ core_type: core })}
                     />
                   ))}
+                  {coreTypes.length === 0 && (
+                    <p className="text-xs text-gray-400">
+                      No board catalog data available.
+                    </p>
+                  )}
                 </div>
               </div>
 
               {availableThicknesses.length > 0 && (
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-2 uppercase">Thickness (mm)</label>
+                  <label className="block text-xs font-medium text-gray-500 mb-2 uppercase">
+                    Thickness (mm)
+                  </label>
                   <div className="flex flex-wrap gap-2">
                     {availableThicknesses.map((thickness) => (
                       <Chip
                         key={thickness}
                         label={`${thickness}mm`}
                         selected={currentBoard.thickness_mm === thickness}
-                        onClick={() => setCurrentBoard({ ...currentBoard, thickness_mm: thickness })}
+                        onClick={() =>
+                          setCurrentBoard({ ...currentBoard, thickness_mm: thickness })
+                        }
                       />
                     ))}
                   </div>
@@ -250,7 +277,9 @@ export function StepPanels({
 
               {availableCompanies.length > 0 && (
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-2 uppercase">Company</label>
+                  <label className="block text-xs font-medium text-gray-500 mb-2 uppercase">
+                    Company
+                  </label>
                   <div className="flex flex-wrap gap-2">
                     {availableCompanies.map((company) => (
                       <Chip
@@ -266,7 +295,9 @@ export function StepPanels({
 
               {availableColors.length > 0 && (
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-2 uppercase">Color</label>
+                  <label className="block text-xs font-medium text-gray-500 mb-2 uppercase">
+                    Color
+                  </label>
                   <div className="flex flex-wrap gap-3">
                     {availableColors.map((color) => (
                       <Chip
@@ -291,32 +322,58 @@ export function StepPanels({
 
               {currentBoard.core_type && (
                 <div className="bg-gray-50 p-4 rounded-lg">
-                  <h4 className="text-xs font-medium text-gray-500 mb-2 uppercase">Current Selection</h4>
+                  <h4 className="text-xs font-medium text-gray-500 mb-2 uppercase">
+                    Current Selection
+                  </h4>
                   <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div><span className="text-gray-600">Core:</span> <strong>{currentBoard.core_type?.replace('_', ' ') || '-'}</strong></div>
-                    <div><span className="text-gray-600">Thickness:</span> <strong>{currentBoard.thickness_mm || '-'}mm</strong></div>
-                    <div><span className="text-gray-600">Company:</span> <strong>{currentBoard.company || '-'}</strong></div>
-                    <div><span className="text-gray-600">Color:</span> <strong>{currentBoard.color_name || '-'}</strong></div>
+                    <div>
+                      <span className="text-gray-600">Core:</span>{' '}
+                      <strong>
+                        {currentBoard.core_type?.replace('_', ' ') || '-'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Thickness:</span>{' '}
+                      <strong>{currentBoard.thickness_mm || '-'}mm</strong>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Company:</span>{' '}
+                      <strong>{currentBoard.company || '-'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Color:</span>{' '}
+                      <strong>{currentBoard.color_name || '-'}</strong>
+                    </div>
                   </div>
                 </div>
               )}
             </div>
           </Card>
 
-          <Card title="Panel Edges" subtitle={`Current panel: ${currentPanel.width || '0'}mm × ${currentPanel.length || '0'}mm`} hover>
+          <Card
+            title="Panel Edges"
+            subtitle={`Current panel: ${currentPanel.width || '0'}mm × ${
+              currentPanel.length || '0'
+            }mm`}
+            hover
+          >
             <div className="space-y-4">
               <div className="flex flex-wrap gap-2">
                 {(['top', 'right', 'bottom', 'left'] as const).map((edge) => (
                   <button
                     key={edge}
-                    onClick={() => setCurrentEdges({ ...currentEdges, [edge]: !currentEdges[edge] })}
+                    onClick={() =>
+                      setCurrentEdges({ ...currentEdges, [edge]: !currentEdges[edge] })
+                    }
                     className={`px-4 py-2 rounded-lg border-2 font-medium text-sm transition-all ${
                       currentEdges[edge]
                         ? 'border-orange-600 bg-orange-50 text-orange-700'
                         : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
                     }`}
                   >
-                    {currentEdges[edge] && <Check className="inline w-4 h-4 mr-1" />}
+                    {currentEdges[edge] && (
+                      <Check className="inline w-4 h-4 mr-1" />
+                    )}
                     {edge.charAt(0).toUpperCase() + edge.slice(1)}
                   </button>
                 ))}
@@ -326,7 +383,12 @@ export function StepPanels({
                 size="sm"
                 onClick={() => {
                   const allSelected = Object.values(currentEdges).every((v) => v);
-                  setCurrentEdges({ top: !allSelected, right: !allSelected, bottom: !allSelected, left: !allSelected });
+                  setCurrentEdges({
+                    top: !allSelected,
+                    right: !allSelected,
+                    bottom: !allSelected,
+                    left: !allSelected,
+                  });
                 }}
               >
                 Toggle All Edges
@@ -342,9 +404,21 @@ export function StepPanels({
             <Button
               variant="outline"
               onClick={() => {
-                setCurrentPanel({ label: '', width: '', length: '', quantity: '1', alignment: 'none', notes: '' });
+                setCurrentPanel({
+                  label: '',
+                  width: '',
+                  length: '',
+                  quantity: '1',
+                  alignment: 'none',
+                  notes: '',
+                });
                 setCurrentBoard({});
-                setCurrentEdges({ top: false, right: false, bottom: false, left: false });
+                setCurrentEdges({
+                  top: false,
+                  right: false,
+                  bottom: false,
+                  left: false,
+                });
                 setErrors({});
               }}
             >
@@ -359,14 +433,22 @@ export function StepPanels({
             hover
             actions={
               <div className="text-sm text-gray-600">
-                <div><strong>{panels.length}</strong> unique panels</div>
-                <div><strong>{totalPieces}</strong> total pieces</div>
-                <div><strong>{totalArea.toFixed(2)}</strong> m² total area</div>
+                <div>
+                  <strong>{panels.length}</strong> unique panels
+                </div>
+                <div>
+                  <strong>{totalPieces}</strong> total pieces
+                </div>
+                <div>
+                  <strong>{totalArea.toFixed(2)}</strong> m² total area
+                </div>
               </div>
             }
           >
             {panels.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">No panels added yet</p>
+              <p className="text-gray-500 text-center py-8">
+                No panels added yet
+              </p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -384,10 +466,16 @@ export function StepPanels({
                     {panels.map((panel, idx) => (
                       <tr key={panel.id} className="border-t border-gray-100">
                         <td className="px-3 py-3">{idx + 1}</td>
-                        <td className="px-3 py-3 font-medium">{panel.label}</td>
-                        <td className="px-3 py-3">{panel.width} × {panel.length}</td>
+                        <td className="px-3 py-3 font-medium">
+                          {panel.label}
+                        </td>
+                        <td className="px-3 py-3">
+                          {panel.width} × {panel.length}
+                        </td>
                         <td className="px-3 py-3">{panel.quantity}</td>
-                        <td className="px-3 py-3 text-xs">{panel.board.company} {panel.board.thickness_mm}mm</td>
+                        <td className="px-3 py-3 text-xs">
+                          {panel.board.company} {panel.board.thickness_mm}mm
+                        </td>
                         <td className="px-3 py-3">
                           <button
                             onClick={() => deletePanel(panel.id)}
@@ -411,19 +499,29 @@ export function StepPanels({
                   <Input
                     type="number"
                     value={sheet.length}
-                    onChange={(e) => updateStockSheet(sheet.id, 'length', Number(e.target.value))}
+                    onChange={(e) =>
+                      updateStockSheet(sheet.id, 'length', Number(e.target.value))
+                    }
                     placeholder="Length"
                   />
                   <Input
                     type="number"
                     value={sheet.width}
-                    onChange={(e) => updateStockSheet(sheet.id, 'width', Number(e.target.value))}
+                    onChange={(e) =>
+                      updateStockSheet(sheet.id, 'width', Number(e.target.value))
+                    }
                     placeholder="Width"
                   />
                   <Input
                     type="number"
                     value={sheet.quantity}
-                    onChange={(e) => updateStockSheet(sheet.id, 'quantity', Number(e.target.value))}
+                    onChange={(e) =>
+                      updateStockSheet(
+                        sheet.id,
+                        'quantity',
+                        Number(e.target.value)
+                      )
+                    }
                     placeholder="Qty"
                   />
                   <button
@@ -444,38 +542,52 @@ export function StepPanels({
           <Card title="Options" hover>
             <div className="space-y-2">
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Kerf (mm)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Kerf (mm)
+                </label>
                 <Input
                   type="number"
                   value={options.kerf}
-                  onChange={(e) => onOptionsChange({ ...options, kerf: Number(e.target.value) })}
+                  onChange={(e) =>
+                    onOptionsChange({ ...options, kerf: Number(e.target.value) })
+                  }
                   step="0.1"
                 />
               </div>
               <Toggle
                 label="Labels on panels"
                 checked={options.labels_on_panels}
-                onChange={(v) => onOptionsChange({ ...options, labels_on_panels: v })}
+                onChange={(v) =>
+                  onOptionsChange({ ...options, labels_on_panels: v })
+                }
               />
               <Toggle
                 label="Use single sheet"
                 checked={options.use_single_sheet}
-                onChange={(v) => onOptionsChange({ ...options, use_single_sheet: v })}
+                onChange={(v) =>
+                  onOptionsChange({ ...options, use_single_sheet: v })
+                }
               />
               <Toggle
                 label="Consider material"
                 checked={options.consider_material}
-                onChange={(v) => onOptionsChange({ ...options, consider_material: v })}
+                onChange={(v) =>
+                  onOptionsChange({ ...options, consider_material: v })
+                }
               />
               <Toggle
                 label="Edge banding"
                 checked={options.edge_banding}
-                onChange={(v) => onOptionsChange({ ...options, edge_banding: v })}
+                onChange={(v) =>
+                  onOptionsChange({ ...options, edge_banding: v })
+                }
               />
               <Toggle
                 label="Consider grain"
                 checked={options.consider_grain}
-                onChange={(v) => onOptionsChange({ ...options, consider_grain: v })}
+                onChange={(v) =>
+                  onOptionsChange({ ...options, consider_grain: v })
+                }
               />
             </div>
           </Card>
@@ -483,10 +595,14 @@ export function StepPanels({
           <Card title="Supply & Customer" hover>
             <div className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3 uppercase">Supply Mode</label>
+                <label className="block text-sm font-medium text-gray-700 mb-3 uppercase">
+                  Supply Mode
+                </label>
                 <div className="grid grid-cols-2 gap-3">
                   <button
-                    onClick={() => onSupplyChange({ factory_supply: true, client_supply: false })}
+                    onClick={() =>
+                      onSupplyChange({ factory_supply: true, client_supply: false })
+                    }
                     className={`p-4 rounded-lg border-2 transition-all ${
                       supply.factory_supply
                         ? 'border-orange-600 bg-orange-50'
@@ -494,10 +610,14 @@ export function StepPanels({
                     }`}
                   >
                     <h4 className="font-semibold text-gray-900">Factory Supply</h4>
-                    <p className="text-xs text-gray-500 mt-1">We provide materials</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      We provide materials
+                    </p>
                   </button>
                   <button
-                    onClick={() => onSupplyChange({ factory_supply: false, client_supply: true })}
+                    onClick={() =>
+                      onSupplyChange({ factory_supply: false, client_supply: true })
+                    }
                     className={`p-4 rounded-lg border-2 transition-all ${
                       supply.client_supply
                         ? 'border-orange-600 bg-orange-50'
@@ -505,7 +625,9 @@ export function StepPanels({
                     }`}
                   >
                     <h4 className="font-semibold text-gray-900">Client Supply</h4>
-                    <p className="text-xs text-gray-500 mt-1">You provide materials</p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      You provide materials
+                    </p>
                   </button>
                 </div>
               </div>
@@ -516,48 +638,73 @@ export function StepPanels({
                     label="Client Boards (qty)"
                     type="number"
                     value={supply.client_boards || ''}
-                    onChange={(e) => onSupplyChange({ ...supply, client_boards: Number(e.target.value) })}
+                    onChange={(e) =>
+                      onSupplyChange({
+                        ...supply,
+                        client_boards: Number(e.target.value),
+                      })
+                    }
                   />
                   <Input
                     label="Client Edging (m)"
                     type="number"
                     value={supply.client_edging || ''}
-                    onChange={(e) => onSupplyChange({ ...supply, client_edging: Number(e.target.value) })}
+                    onChange={(e) =>
+                      onSupplyChange({
+                        ...supply,
+                        client_edging: Number(e.target.value),
+                      })
+                    }
                   />
                 </div>
               )}
 
               <div className="space-y-3">
-                <h4 className="text-sm font-medium text-gray-700 uppercase">Customer Details</h4>
+                <h4 className="text-sm font-medium text-gray-700 uppercase">
+                  Customer Details
+                </h4>
                 <Input
                   label="Project Name"
                   value={customer.project_name}
-                  onChange={(e) => onCustomerChange({ ...customer, project_name: e.target.value })}
+                  onChange={(e) =>
+                    onCustomerChange({ ...customer, project_name: e.target.value })
+                  }
                   placeholder="e.g., Kitchen Cabinets"
                 />
                 <Input
                   label="Customer Name"
                   value={customer.customer_name}
-                  onChange={(e) => onCustomerChange({ ...customer, customer_name: e.target.value })}
+                  onChange={(e) =>
+                    onCustomerChange({
+                      ...customer,
+                      customer_name: e.target.value,
+                    })
+                  }
                   placeholder="Full name"
                 />
                 <Input
                   label="Email"
                   type="email"
                   value={customer.email}
-                  onChange={(e) => onCustomerChange({ ...customer, email: e.target.value })}
+                  onChange={(e) =>
+                    onCustomerChange({ ...customer, email: e.target.value })
+                  }
                   placeholder="email@example.com"
                 />
                 <Input
                   label="Phone/WhatsApp"
                   value={customer.phone}
-                  onChange={(e) => onCustomerChange({ ...customer, phone: e.target.value })}
+                  onChange={(e) =>
+                    onCustomerChange({ ...customer, phone: e.target.value })
+                  }
                   placeholder="254712345678"
                 />
                 <Input
                   label="Notes (Optional)"
                   value={customer.notes}
-                  onChange={(e) => onCustomerChange({ ...customer, notes: e.target.value })}
+                  onChange={(e) =>
+                    onCustomerChange({ ...customer, notes: e.target.value })
+                  }
                   placeholder="Additional notes..."
                 />
               </div>
