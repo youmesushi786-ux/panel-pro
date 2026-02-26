@@ -46,6 +46,9 @@ export function StepPanels({
   onNext,
 }: StepPanelsProps) {
   const [catalog, setCatalog] = useState<BoardCatalog | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+
   const [currentPanel, setCurrentPanel] = useState({
     label: '',
     width: '',
@@ -64,17 +67,37 @@ export function StepPanels({
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    api.getBoardCatalog().then(setCatalog).catch(console.error);
+    setCatalogLoading(true);
+    api
+      .getBoardCatalog()
+      .then((data) => {
+        console.log('Board catalog from API:', data);
+        setCatalog(data);
+        setCatalogError(null);
+      })
+      .catch((err) => {
+        console.error('Error loading board catalog:', err);
+        setCatalogError(
+          err instanceof Error ? err.message : 'Failed to load board catalog'
+        );
+      })
+      .finally(() => {
+        setCatalogLoading(false);
+      });
   }, []);
 
   const validatePanel = () => {
     const newErrors: Record<string, string> = {};
     if (!currentPanel.label) newErrors.label = 'Label is required';
-    if (!currentPanel.width || Number(currentPanel.width) <= 0) newErrors.width = 'Width must be > 0';
-    if (!currentPanel.length || Number(currentPanel.length) <= 0) newErrors.length = 'Length must be > 0';
-    if (!currentPanel.quantity || Number(currentPanel.quantity) <= 0) newErrors.quantity = 'Quantity must be > 0';
+    if (!currentPanel.width || Number(currentPanel.width) <= 0)
+      newErrors.width = 'Width must be > 0';
+    if (!currentPanel.length || Number(currentPanel.length) <= 0)
+      newErrors.length = 'Length must be > 0';
+    if (!currentPanel.quantity || Number(currentPanel.quantity) <= 0)
+      newErrors.quantity = 'Quantity must be > 0';
     if (!currentBoard.core_type) newErrors.core = 'Core type is required';
-    if (!currentBoard.thickness_mm) newErrors.thickness = 'Thickness is required';
+    if (!currentBoard.thickness_mm)
+      newErrors.thickness = 'Thickness is required';
     if (!currentBoard.company) newErrors.company = 'Company is required';
     if (!currentBoard.color_code) newErrors.color = 'Color is required';
     setErrors(newErrors);
@@ -97,7 +120,14 @@ export function StepPanels({
     };
 
     onPanelsChange([...panels, newPanel]);
-    setCurrentPanel({ label: '', width: '', length: '', quantity: '1', alignment: 'none', notes: '' });
+    setCurrentPanel({
+      label: '',
+      width: '',
+      length: '',
+      quantity: '1',
+      alignment: 'none',
+      notes: '',
+    });
     setCurrentBoard({});
     setCurrentEdges({ top: false, right: false, bottom: false, left: false });
     setErrors({});
@@ -116,7 +146,9 @@ export function StepPanels({
 
   const updateStockSheet = (id: string, field: string, value: number) => {
     onStockSheetsChange(
-      stockSheets.map((sheet) => (sheet.id === id ? { ...sheet, [field]: value } : sheet))
+      stockSheets.map((sheet) =>
+        sheet.id === id ? { ...sheet, [field]: value } : sheet
+      )
     );
   };
 
@@ -124,29 +156,53 @@ export function StepPanels({
     onStockSheetsChange(stockSheets.filter((s) => s.id !== id));
   };
 
-  const totalArea = panels.reduce((sum, p) => sum + (p.width * p.length * p.quantity) / 1000000, 0);
+  const totalArea = panels.reduce(
+    (sum, p) => sum + (p.width * p.length * p.quantity) / 1000000,
+    0
+  );
   const totalPieces = panels.reduce((sum, p) => sum + p.quantity, 0);
 
-  const availableThicknesses = currentBoard.core_type && catalog
-    ? catalog.catalog[currentBoard.core_type]?.thicknesses || []
-    : [];
+  // Safely derive the core map from the catalog
+  const coreMap: Record<
+    string,
+    { thicknesses?: number[]; companies?: string[] }
+  > =
+    catalog &&
+    catalog.catalog &&
+    typeof catalog.catalog === 'object' &&
+    !Array.isArray(catalog.catalog)
+      ? (catalog.catalog as any)
+      : {};
 
-  const availableCompanies = currentBoard.core_type && currentBoard.thickness_mm && catalog
-    ? catalog.catalog[currentBoard.core_type]?.companies || []
-    : [];
+  const coreTypes = Object.keys(coreMap);
 
-  const availableColors = currentBoard.company && catalog
-    ? catalog.colors[currentBoard.company] || []
-    : [];
+  const availableThicknesses =
+    currentBoard.core_type && coreMap[currentBoard.core_type]
+      ? coreMap[currentBoard.core_type].thicknesses || []
+      : [];
 
-  // SAFE: core types list even if catalog or catalog.catalog is null/undefined
-  const coreTypes = Object.keys(catalog?.catalog ?? {});
+  const availableCompanies =
+    currentBoard.core_type &&
+    currentBoard.thickness_mm &&
+    coreMap[currentBoard.core_type]
+      ? coreMap[currentBoard.core_type].companies || []
+      : [];
+
+  const availableColors =
+    currentBoard.company && catalog && (catalog as any).colors
+      ? (catalog as any).colors[currentBoard.company] || []
+      : [];
 
   return (
     <div className="p-6 max-w-[1800px] mx-auto">
       <div className="mb-6">
-        <h2 className="text-3xl font-bold text-gray-900 mb-2">Panels & Board Configuration</h2>
-        <p className="text-gray-600">Define your panels, select board materials, and configure cutting options</p>
+        <h2 className="text-3xl font-bold text-gray-900 mb-2">
+          Panels & Board Configuration
+        </h2>
+        <p className="text-gray-600">
+          Define your panels, select board materials, and configure cutting
+          options
+        </p>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -157,7 +213,9 @@ export function StepPanels({
                 <Input
                   label="Label"
                   value={currentPanel.label}
-                  onChange={(e) => setCurrentPanel({ ...currentPanel, label: e.target.value })}
+                  onChange={(e) =>
+                    setCurrentPanel({ ...currentPanel, label: e.target.value })
+                  }
                   error={errors.label}
                   placeholder="e.g., Door Panel"
                 />
@@ -165,7 +223,12 @@ export function StepPanels({
                   label="Quantity"
                   type="number"
                   value={currentPanel.quantity}
-                  onChange={(e) => setCurrentPanel({ ...currentPanel, quantity: e.target.value })}
+                  onChange={(e) =>
+                    setCurrentPanel({
+                      ...currentPanel,
+                      quantity: e.target.value,
+                    })
+                  }
                   error={errors.quantity}
                   min="1"
                 />
@@ -175,7 +238,9 @@ export function StepPanels({
                   label="Width (mm)"
                   type="number"
                   value={currentPanel.width}
-                  onChange={(e) => setCurrentPanel({ ...currentPanel, width: e.target.value })}
+                  onChange={(e) =>
+                    setCurrentPanel({ ...currentPanel, width: e.target.value })
+                  }
                   error={errors.width}
                   placeholder="e.g., 600"
                 />
@@ -183,7 +248,9 @@ export function StepPanels({
                   label="Length (mm)"
                   type="number"
                   value={currentPanel.length}
-                  onChange={(e) => setCurrentPanel({ ...currentPanel, length: e.target.value })}
+                  onChange={(e) =>
+                    setCurrentPanel({ ...currentPanel, length: e.target.value })
+                  }
                   error={errors.length}
                   placeholder="e.g., 800"
                 />
@@ -191,7 +258,12 @@ export function StepPanels({
               <Select
                 label="Alignment"
                 value={currentPanel.alignment}
-                onChange={(e) => setCurrentPanel({ ...currentPanel, alignment: e.target.value })}
+                onChange={(e) =>
+                  setCurrentPanel({
+                    ...currentPanel,
+                    alignment: e.target.value,
+                  })
+                }
                 options={[
                   { value: 'none', label: 'None' },
                   { value: 'horizontal', label: 'Horizontal' },
@@ -201,7 +273,9 @@ export function StepPanels({
               <Input
                 label="Notes (Optional)"
                 value={currentPanel.notes}
-                onChange={(e) => setCurrentPanel({ ...currentPanel, notes: e.target.value })}
+                onChange={(e) =>
+                  setCurrentPanel({ ...currentPanel, notes: e.target.value })
+                }
                 placeholder="Additional notes..."
               />
               {currentPanel.width && currentPanel.length && (
@@ -209,7 +283,8 @@ export function StepPanels({
                   Area per panel:{' '}
                   <strong>
                     {(
-                      (Number(currentPanel.width) * Number(currentPanel.length)) /
+                      (Number(currentPanel.width) *
+                        Number(currentPanel.length)) /
                       1000000
                     ).toFixed(2)}{' '}
                     m²
@@ -226,8 +301,15 @@ export function StepPanels({
             </div>
           </Card>
 
-          <Card title="Board Selection" subtitle="Choose core, thickness, company, and color" hover>
-            {errors.core || errors.thickness || errors.company || errors.color ? (
+          <Card
+            title="Board Selection"
+            subtitle="Choose core, thickness, company, and color"
+            hover
+          >
+            {errors.core ||
+            errors.thickness ||
+            errors.company ||
+            errors.color ? (
               <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-600">
                 Please complete all board selections
               </div>
@@ -247,9 +329,24 @@ export function StepPanels({
                       onClick={() => setCurrentBoard({ core_type: core })}
                     />
                   ))}
-                  {coreTypes.length === 0 && (
+
+                  {catalogLoading && (
                     <p className="text-xs text-gray-400">
-                      No board catalog data available.
+                      Loading board catalog...
+                    </p>
+                  )}
+
+                  {!catalogLoading &&
+                    !catalogError &&
+                    coreTypes.length === 0 && (
+                      <p className="text-xs text-gray-400">
+                        No board catalog data available.
+                      </p>
+                    )}
+
+                  {catalogError && (
+                    <p className="text-xs text-red-500">
+                      Failed to load board catalog: {catalogError}
                     </p>
                   )}
                 </div>
@@ -267,7 +364,10 @@ export function StepPanels({
                         label={`${thickness}mm`}
                         selected={currentBoard.thickness_mm === thickness}
                         onClick={() =>
-                          setCurrentBoard({ ...currentBoard, thickness_mm: thickness })
+                          setCurrentBoard({
+                            ...currentBoard,
+                            thickness_mm: thickness,
+                          })
                         }
                       />
                     ))}
@@ -286,7 +386,9 @@ export function StepPanels({
                         key={company}
                         label={company}
                         selected={currentBoard.company === company}
-                        onClick={() => setCurrentBoard({ ...currentBoard, company })}
+                        onClick={() =>
+                          setCurrentBoard({ ...currentBoard, company })
+                        }
                       />
                     ))}
                   </div>
@@ -299,7 +401,7 @@ export function StepPanels({
                     Color
                   </label>
                   <div className="flex flex-wrap gap-3">
-                    {availableColors.map((color) => (
+                    {availableColors.map((color: any) => (
                       <Chip
                         key={color.code}
                         label={`${color.code} - ${color.name}`}
@@ -363,7 +465,10 @@ export function StepPanels({
                   <button
                     key={edge}
                     onClick={() =>
-                      setCurrentEdges({ ...currentEdges, [edge]: !currentEdges[edge] })
+                      setCurrentEdges({
+                        ...currentEdges,
+                        [edge]: !currentEdges[edge],
+                      })
                     }
                     className={`px-4 py-2 rounded-lg border-2 font-medium text-sm transition-all ${
                       currentEdges[edge]
@@ -382,7 +487,9 @@ export function StepPanels({
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  const allSelected = Object.values(currentEdges).every((v) => v);
+                  const allSelected = Object.values(currentEdges).every(
+                    (v) => v
+                  );
                   setCurrentEdges({
                     top: !allSelected,
                     right: !allSelected,
@@ -667,7 +774,10 @@ export function StepPanels({
                   label="Project Name"
                   value={customer.project_name}
                   onChange={(e) =>
-                    onCustomerChange({ ...customer, project_name: e.target.value })
+                    onCustomerChange({
+                      ...customer,
+                      project_name: e.target.value,
+                    })
                   }
                   placeholder="e.g., Kitchen Cabinets"
                 />
