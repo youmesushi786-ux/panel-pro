@@ -312,37 +312,57 @@ export function StepResults({
 
   const layout = results.layouts[currentSheetIndex];
 
-  // Per‑sheet used/waste areas (backend: used_area_mm2 / waste_area_mm2)
-  const usedAreaMm2 =
-    ((layout as any).used_area_mm2 ??
-      (layout as any).used_area ??
-      0) as number;
-  const wasteAreaMm2 =
-    ((layout as any).waste_area_mm2 ??
-      (layout as any).waste_area ??
-      0) as number;
+  // ---- Per-sheet used/waste areas (accept multiple field names, coerce to number) ----
+  const rawUsedArea =
+    (layout as any).used_area_mm2 ??
+    (layout as any).used_area ??
+    (layout as any).usedArea ??
+    0;
+  const rawWasteArea =
+    (layout as any).waste_area_mm2 ??
+    (layout as any).waste_area ??
+    (layout as any).wasteArea ??
+    0;
+
+  const usedAreaMm2 = Number(rawUsedArea) || 0;
+  const wasteAreaMm2 = Number(rawWasteArea) || 0;
+
   const boardTotalAreaMm2 = usedAreaMm2 + wasteAreaMm2;
   const boardWastePercent =
     boardTotalAreaMm2 > 0
       ? (wasteAreaMm2 / boardTotalAreaMm2) * 100
       : 0;
 
-  // Global used/waste areas
-  const totalUsedAreaMm2 = results.layouts.reduce(
-    (sum, b) =>
-      sum +
-      (((b as any).used_area_mm2 ?? (b as any).used_area ?? 0) as number),
-    0,
-  );
-  const totalWasteAreaMm2 =
-    ((results.optimization as any).total_waste_mm2 ??
-      (results.optimization as any).total_waste_area ??
-      0) as number;
+  // ---- Global used/waste areas from all layouts / optimization summary ----
+  const totalUsedAreaMm2 = results.layouts.reduce((sum, b) => {
+    const ru =
+      (b as any).used_area_mm2 ??
+      (b as any).used_area ??
+      (b as any).usedArea ??
+      0;
+    const val = Number(ru) || 0;
+    return sum + val;
+  }, 0);
 
-  const totalBoardsUsed =
-    ((results.optimization as any).total_boards_used ??
-      (results.optimization as any).total_boards ??
-      results.layouts.length) as number;
+  const totalWasteAreaMm2 = (() => {
+    const ro = results.optimization as any;
+    const rw =
+      ro.total_waste_mm2 ??
+      ro.total_waste_area ??
+      ro.totalWasteMm2 ??
+      0;
+    return Number(rw) || 0;
+  })();
+
+  const totalBoardsUsed = (() => {
+    const ro = results.optimization as any;
+    const rb =
+      ro.total_boards_used ??
+      ro.total_boards ??
+      ro.totalBoards ??
+      results.layouts.length;
+    return Number(rb) || results.layouts.length;
+  })();
 
   // ----------------- NORMALIZE BACKEND BOQ & PRICING SHAPE -----------------
   const rawBoq: any = (results as any).boq ?? {};
@@ -571,7 +591,9 @@ export function StepResults({
                         </div>
                         <div>
                           <span className="text-gray-600">Rotated:</span>{' '}
-                          <strong>{(hoveredPanel as any).rotated ? 'Yes' : 'No'}</strong>
+                          <strong>
+                            {(hoveredPanel as any).rotated ? 'Yes' : 'No'}
+                          </strong>
                         </div>
                       </div>
                     </div>
@@ -641,7 +663,10 @@ export function StepResults({
                 </thead>
                 <tbody>
                   {boqItems.map((item) => (
-                    <tr key={item.item_no ?? item.item_number} className="border-b">
+                    <tr
+                      key={item.item_no ?? item.item_number}
+                      className="border-b"
+                    >
                       <td className="px-3 py-2">
                         {item.item_no ?? item.item_number}
                       </td>
