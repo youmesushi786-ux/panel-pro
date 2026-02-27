@@ -8,9 +8,18 @@ import type {
 } from '../types';
 
 // Backend base URL
-// You can override with Vite env: VITE_API_BASE="https://your-ngrok-url"
+// Priority:
+// 1) VITE_API_BASE (recommended)
+// 2) VITE_API_BASE_URL (fallback)
+// 3) http://127.0.0.1:8000 for local dev
+const envBase =
+  (import.meta.env.VITE_API_BASE as string | undefined) ??
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
+  undefined;
+
+// Normalize: remove trailing slash if present
 const API_BASE: string =
-  (import.meta.env.VITE_API_BASE as string | undefined) ?? 'http://127.0.0.1:8000';
+  (envBase ? envBase.replace(/\/$/, '') : undefined) ?? 'http://127.0.0.1:8000';
 
 /**
  * Convert frontend CuttingRequest shape -> backend CuttingRequest shape.
