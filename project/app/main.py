@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict
 
@@ -26,7 +27,8 @@ from app.config import (
     EDGING_PRICE_PER_METER,
     CLIENT_EDGING_PRICE_PER_METER,
 )
-from .mpesa import initiate_stk_push  # make sure app/mpesa.py exists
+from app.mpesa import initiate_stk_push  # make sure app/mpesa.py exists
+from app.email_utils import send_email, COMPANY_EMAIL
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -40,12 +42,26 @@ logging.basicConfig(
 
 app = FastAPI(title="PanelPro - Cutting Optimizer")
 
+# ---------------------------------------------------------------------------
+# CORS (configurable via ALLOWED_ORIGINS env)
+# ---------------------------------------------------------------------------
+
+_allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+if _allowed_origins_env:
+    _origins = [
+        o.strip() for o in _allowed_origins_env.split(",") if o.strip()
+    ]
+else:
+    # For development / testing, allow all. In production, set ALLOWED_ORIGINS.
+    _origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ---------------------------------------------------------------------------
 # Request / response logging middleware
@@ -77,7 +93,7 @@ async def log_requests(request: Request, call_next):
     status = response.status_code
     logger.info("⬅ %s - status %s", route_id, status)
 
-    # Log response body (useful for 422s, etc.)
+    # Log response body (best effort; may not work for all response types)
     try:
         body_bytes = getattr(response, "body", b"")
         if body_bytes:
@@ -115,7 +131,9 @@ PAYMENTS: dict[str, dict[str, Any]] = {}
 PENDING_CHECKOUT: dict[str, str] = {}  # CheckoutRequestID -> order_id
 
 
-# -------- HEALTH & BOARDS CATALOG --------
+# ---------------------------------------------------------------------------
+# HEALTH & BOARDS CATALOG
+# ---------------------------------------------------------------------------
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -136,7 +154,9 @@ async def boards_catalog() -> Dict[str, Any]:
     }
 
 
-# -------- OPTIMIZE & BOQ --------
+# ---------------------------------------------------------------------------
+# OPTIMIZE & BOQ
+# ---------------------------------------------------------------------------
 
 
 def build_boq(
@@ -250,7 +270,9 @@ async def api_optimize(req: CuttingRequest) -> CuttingResponse:
     )
 
 
-# -------- ORDER CREATION (used by payment step) --------
+# ---------------------------------------------------------------------------
+# ORDER CREATION (used by payment step)
+# ---------------------------------------------------------------------------
 
 
 @app.post("/api/order/create")
@@ -274,6 +296,10 @@ async def order_create(req: CuttingRequest):
         "currency": pricing.currency,
         "status": "created",
         "created_at": datetime.utcnow().isoformat(),
+        "project_name": req.project_name,
+        "customer_name": req.customer_name,
+        "customer_email": req.customer_email,
+        "customer_phone": req.customer_phone,
     }
     PAYMENTS[order_id] = {
         "status": "pending",
@@ -287,7 +313,9 @@ async def order_create(req: CuttingRequest):
     }
 
 
-# -------- REAL M-PESA STK PUSH --------
+# ---------------------------------------------------------------------------
+# REAL M-PESA STK PUSH
+# ---------------------------------------------------------------------------
 
 
 @app.post("/api/mpesa/initiate")
@@ -351,7 +379,7 @@ async def mpesa_initiate_endpoint(payload: Dict[str, Any]):
 async def mpesa_callback(request: Request):
     """
     Callback URL that Safaricom calls with the STK result.
-    Must be reachable via public HTTPS (e.g. ngrok).
+    Must be reachable via public HTTPS.
     """
     data = await request.json()
     logger.info("Received /api/mpesa/callback: %s", data)
@@ -417,11 +445,106 @@ async def payment_status(order_id: str = Query(...)):
     return data
 
 
+# ---------------------------------------------------------------------------
+# EMAIL TEST ENDPOINT
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/test-email")
+async def test_email(to: str = Query(..., description="Destination email")):
+    """
+    Simple endpoint to test SMTP settings.
+    Call:
+      POST /api/test-email?to=you@example.com
+    """
+    logger.info("Sending test email to %s", to)
+    subject = "PanelPro test email"
+    html = "<h1>PanelPro Email Test</h1><p>If you see this, SMTP is working.</p>"
+
+    send_email(to_email=to, subject=subject, html_body=html)
+    return {"status": "sent", "to": to}
+
+
+# ---------------------------------------------------------------------------
+# NOTIFY AFTER PAYMENT (send invoice/BOQ emails)
+# ---------------------------------------------------------------------------
+
+
 @app.post("/api/notify/after-payment")
 async def notify_after_payment(payload: Dict[str, Any]):
     """
-    Called by frontend after payment success (you can send email/WhatsApp here).
+    Called by frontend after payment success (demo or real).
+    Expected payload from frontend:
+      {
+        "order_id": "...",
+        "project_name": "...",
+        "customer_name": "...",
+        "customer_email": "...",
+        "customer_phone": "..."
+      }
     """
     logger.info("notify_after_payment payload=%s", payload)
-    # In production: generate PDF / send email / WhatsApp etc.
-    return {"status": "ok", "message": "Notification simulated."}
+
+    order_id: str | None = payload.get("order_id")
+    project_name: str | None = payload.get("project_name")
+    customer_name: str | None = payload.get("customer_name")
+    customer_email: str | None = payload.get("customer_email")
+    customer_phone: str | None = payload.get("customer_phone")
+
+    order = ORDERS.get(order_id) if order_id else None
+    payment = PAYMENTS.get(order_id) if order_id else None
+
+    amount = order["amount"] if order else None
+    currency = order["currency"] if order else None
+    payment_status = payment["status"] if payment else "unknown"
+    mpesa_receipt = payment.get("mpesa_receipt") if payment else None
+
+    # ---- Email to customer (invoice/summary) ----
+    customer_email_sent = False
+    if customer_email:
+        subject_c = f"Invoice & BOQ for {project_name or 'your project'}"
+        html_c = f"""
+        <h2>Thank you, {customer_name or 'Customer'}</h2>
+        <p>Your payment for project <strong>{project_name or order_id}</strong> has been received.</p>
+        <p><strong>Order ID:</strong> {order_id or 'N/A'}</p>
+        <p><strong>Amount:</strong> {amount:.2f} {currency}</p>
+        <p><strong>Status:</strong> {payment_status}</p>
+        <p><strong>Mpesa Receipt:</strong> {mpesa_receipt or 'N/A'}</p>
+
+        <p>BOQ and detailed optimization are available in our system.</p>
+        """
+        try:
+            send_email(to_email=customer_email, subject=subject_c, html_body=html_c)
+            customer_email_sent = True
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to send customer email: %s", exc)
+
+    # ---- Email to company (full job summary) ----
+    subject_i = f"[PANELPRO JOB] {project_name or order_id}"
+    html_i = f"""
+    <h2>New Cutting Job Paid</h2>
+    <p><strong>Project:</strong> {project_name}</p>
+    <p><strong>Customer:</strong> {customer_name}</p>
+    <p><strong>Email:</strong> {customer_email}</p>
+    <p><strong>Phone:</strong> {customer_phone}</p>
+    <p><strong>Order ID:</strong> {order_id}</p>
+    <p><strong>Amount:</strong> {amount:.2f} {currency}</p>
+    <p><strong>Status:</strong> {payment_status}</p>
+    <p><strong>Mpesa Receipt:</strong> {mpesa_receipt or 'N/A'}</p>
+
+    <p>BOQ and optimization details are stored in the system for review.</p>
+    """
+
+    company_email_sent = False
+    try:
+        send_email(to_email=COMPANY_EMAIL, subject=subject_i, html_body=html_i)
+        company_email_sent = True
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to send company email: %s", exc)
+
+    return {
+        "status": "ok",
+        "message": "Notification processed.",
+        "customer_email_sent": customer_email_sent,
+        "company_email_sent": company_email_sent,
+    }
