@@ -46,6 +46,12 @@ export function StepResults({
   const [receiptNumber, setReceiptNumber] = useState('');
   const [hasPaid, setHasPaid] = useState(false); // controls access to layouts & optimization
 
+  // New: manual notification status (email + WhatsApp)
+  const [notificationStatus, setNotificationStatus] = useState<
+    'idle' | 'sending' | 'sent' | 'error'
+  >('idle');
+  const [notificationMessage, setNotificationMessage] = useState('');
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pollIntervalRef = useRef<number | null>(null);
   const timeoutRef = useRef<number | null>(null);
@@ -176,39 +182,18 @@ export function StepResults({
   const handlePayment = async () => {
     if (!mpesaPhone || !results) return;
 
-    // DEMO: simulate a successful payment, but still call backend
-    // notifyAfterPayment so invoices/BOQ are actually generated and sent.
+    // Reset notification state when starting a new payment
+    setNotificationStatus('idle');
+    setNotificationMessage('');
+
+    // DEMO: always succeed, unlock layouts, do not call real M‑Pesa
     if (DEMO_PAYMENT_MODE) {
       const demoOrderId = 'DEMO_' + Date.now();
       setOrderId(demoOrderId);
-      setPaymentStatus('processing');
-      setPaymentMessage(
-        'Simulated payment... sending test invoice and BOQ via backend.',
-      );
-
-      try {
-        await api.notifyAfterPayment({
-          order_id: demoOrderId,
-          project_name: projectName,
-          customer_name: customerName,
-          customer_email: customerEmail,
-          customer_phone: customerPhone,
-        });
-
-        setPaymentStatus('paid');
-        setHasPaid(true);
-        setReceiptNumber('DEMO-RECEIPT');
-        setPaymentMessage(
-          'Demo payment successful. Test invoice and BOQ have been sent.',
-        );
-      } catch (error) {
-        console.error('notifyAfterPayment failed in demo mode:', error);
-        setPaymentStatus('failed');
-        setPaymentMessage(
-          'Demo payment failed: could not trigger after-payment notifications.',
-        );
-      }
-
+      setPaymentStatus('paid');
+      setHasPaid(true);
+      setReceiptNumber('DEMO-RECEIPT');
+      setPaymentMessage('Demo payment successful. Layouts unlocked for testing.');
       return;
     }
 
@@ -248,14 +233,6 @@ export function StepResults({
               clearInterval(pollIntervalRef.current);
               pollIntervalRef.current = null;
             }
-
-            await api.notifyAfterPayment({
-              order_id: newOrderId,
-              project_name: projectName,
-              customer_name: customerName,
-              customer_email: customerEmail,
-              customer_phone: customerPhone,
-            });
           } else if (status.status === 'failed') {
             setPaymentStatus('failed');
             setPaymentMessage(status.status_reason || 'Payment failed');
@@ -284,6 +261,44 @@ export function StepResults({
     } catch (error) {
       setPaymentStatus('failed');
       setPaymentMessage(error instanceof Error ? error.message : 'Payment failed');
+    }
+  };
+
+  // Manual trigger: send email & WhatsApp, then go back to panels step
+  const handleSendNotifications = async () => {
+    if (!results) return;
+
+    const effectiveOrderId = orderId || results.report_id;
+
+    setNotificationStatus('sending');
+    setNotificationMessage('Sending email and WhatsApp notifications...');
+
+    try {
+      await api.notifyAfterPayment({
+        order_id: effectiveOrderId,
+        project_name: projectName,
+        customer_name: customerName,
+        customer_email: customerEmail,
+        customer_phone: customerPhone,
+      });
+
+      setNotificationStatus('sent');
+      setNotificationMessage(
+        'Notifications sent. You will be redirected back to the configuration step.',
+      );
+
+      // Go back to panels step after a short delay
+      setTimeout(() => {
+        onBack();
+      }, 1500);
+    } catch (error) {
+      console.error('notifyAfterPayment failed:', error);
+      setNotificationStatus('error');
+      setNotificationMessage(
+        error instanceof Error
+          ? error.message
+          : 'Failed to send notifications. Please try again.',
+      );
     }
   };
 
@@ -453,7 +468,7 @@ export function StepResults({
         </p>
       </div>
 
-      {/* Main grid: left = layouts/BOQ/pricing, right = payment */}
+      {/* Main grid: left = layouts/BOQ/pricing, right = payment & notifications */}
       <div className="grid grid-cols-1 xl:grid-cols-[2fr,1fr] gap-6">
         {/* LEFT / CENTER COLUMN */}
         <div className="space-y-6">
@@ -799,7 +814,7 @@ export function StepResults({
           </Card>
         </div>
 
-        {/* RIGHT COLUMN – payment only */}
+        {/* RIGHT COLUMN – payment and manual notifications */}
         <div className="space-y-6">
           <Card title="M-Pesa Payment" hover>
             <div className="space-y-4">
@@ -852,6 +867,34 @@ export function StepResults({
                     </div>
                   )}
                 </>
+              )}
+
+              {/* Manual notifications after payment */}
+              {paymentStatus === 'paid' && (
+                <div className="space-y-2">
+                  <Button
+                    onClick={handleSendNotifications}
+                    fullWidth
+                    variant="outline"
+                    disabled={notificationStatus === 'sending'}
+                  >
+                    {notificationStatus === 'sending'
+                      ? 'Sending notifications...'
+                      : 'Send invoice via Email & WhatsApp'}
+                  </Button>
+
+                  {notificationMessage && (
+                    <div
+                      className={`p-3 rounded text-sm ${
+                        notificationStatus === 'error'
+                          ? 'bg-red-50 text-red-700'
+                          : 'bg-green-50 text-green-700'
+                      }`}
+                    >
+                      {notificationMessage}
+                    </div>
+                  )}
+                </div>
               )}
 
               <div className="text-xs text-gray-500 space-y-1">
