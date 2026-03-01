@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Check } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { Select } from '../components/ui/Select';
 import { Toggle } from '../components/ui/Toggle';
 import { Chip } from '../components/ui/Chip';
 import { api } from '../api/client';
@@ -48,21 +47,7 @@ export function StepPanels({
   const [catalog, setCatalog] = useState<BoardCatalog | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
 
-  const [currentPanel, setCurrentPanel] = useState({
-    label: '',
-    width: '',
-    length: '',
-    quantity: '1',
-    alignment: 'none',
-    notes: '',
-  });
   const [currentBoard, setCurrentBoard] = useState<Partial<BoardSelection>>({});
-  const [currentEdges, setCurrentEdges] = useState<PanelEdges>({
-    top: false,
-    right: false,
-    bottom: false,
-    left: false,
-  });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -81,15 +66,8 @@ export function StepPanels({
       });
   }, []);
 
-  const validatePanel = () => {
+  const validateBoardSelection = () => {
     const newErrors: Record<string, string> = {};
-    if (!currentPanel.label) newErrors.label = 'Label is required';
-    if (!currentPanel.width || Number(currentPanel.width) <= 0)
-      newErrors.width = 'Width must be > 0';
-    if (!currentPanel.length || Number(currentPanel.length) <= 0)
-      newErrors.length = 'Length must be > 0';
-    if (!currentPanel.quantity || Number(currentPanel.quantity) <= 0)
-      newErrors.quantity = 'Quantity must be > 0';
     if (!currentBoard.core_type) newErrors.core = 'Core type is required';
     if (!currentBoard.thickness_mm)
       newErrors.thickness = 'Thickness is required';
@@ -99,33 +77,65 @@ export function StepPanels({
     return Object.keys(newErrors).length === 0;
   };
 
-  const addPanel = () => {
-    if (!validatePanel()) return;
+  const addPanelRow = () => {
+    if (!validateBoardSelection()) return;
 
     const newPanel: Panel = {
       id: Date.now().toString(),
-      label: currentPanel.label,
-      width: Number(currentPanel.width),
-      length: Number(currentPanel.length),
-      quantity: Number(currentPanel.quantity),
-      alignment: currentPanel.alignment as 'none' | 'horizontal' | 'vertical',
-      notes: currentPanel.notes,
+      label: '',
+      width: 0,
+      length: 0,
+      quantity: 1,
+      alignment: 'none',
+      notes: '',
       board: currentBoard as BoardSelection,
-      edges: { ...currentEdges },
+      edges: {
+        top: false,
+        right: false,
+        bottom: false,
+        left: false,
+      },
     };
 
     onPanelsChange([...panels, newPanel]);
-    setCurrentPanel({
-      label: '',
-      width: '',
-      length: '',
-      quantity: '1',
-      alignment: 'none',
-      notes: '',
-    });
-    setCurrentBoard({});
-    setCurrentEdges({ top: false, right: false, bottom: false, left: false });
-    setErrors({});
+  };
+
+  const updatePanelField = (
+    id: string,
+    field: keyof Panel,
+    value: string | number,
+  ) => {
+    onPanelsChange(
+      panels.map((p) =>
+        p.id === id
+          ? {
+              ...p,
+              [field]:
+                field === 'width' ||
+                field === 'length' ||
+                field === 'quantity'
+                  ? Number(value) || 0
+                  : value,
+            }
+          : p,
+      ),
+    );
+  };
+
+  const togglePanelEdge = (id: string, edge: keyof PanelEdges) => {
+    onPanelsChange(
+      panels.map((p) =>
+        p.id === id
+          ? {
+              ...p,
+              edges: {
+                ...p.edges,
+                [edge]: !p.edges?.[edge],
+              },
+            }
+          : p,
+      ),
+    );
   };
 
   const deletePanel = (id: string) => {
@@ -180,116 +190,22 @@ export function StepPanels({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        {/* LEFT COLUMN: Board selection + summary + actions */}
         <div className="space-y-6">
-          {/* New Panel form */}
-          <Card title="New Panel" hover>
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <Input
-                  label="Label"
-                  value={currentPanel.label}
-                  onChange={(e) =>
-                    setCurrentPanel({ ...currentPanel, label: e.target.value })
-                  }
-                  error={errors.label}
-                  placeholder="e.g., Door Panel"
-                />
-                <Input
-                  label="Quantity"
-                  type="number"
-                  value={currentPanel.quantity}
-                  onChange={(e) =>
-                    setCurrentPanel({
-                      ...currentPanel,
-                      quantity: e.target.value,
-                    })
-                  }
-                  error={errors.quantity}
-                  min="1"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <Input
-                  label="Width (mm)"
-                  type="number"
-                  value={currentPanel.width}
-                  onChange={(e) =>
-                    setCurrentPanel({ ...currentPanel, width: e.target.value })
-                  }
-                  error={errors.width}
-                  placeholder="e.g., 600"
-                />
-                <Input
-                  label="Length (mm)"
-                  type="number"
-                  value={currentPanel.length}
-                  onChange={(e) =>
-                    setCurrentPanel({ ...currentPanel, length: e.target.value })
-                  }
-                  error={errors.length}
-                  placeholder="e.g., 800"
-                />
-              </div>
-              <Select
-                label="Alignment"
-                value={currentPanel.alignment}
-                onChange={(e) =>
-                  setCurrentPanel({
-                    ...currentPanel,
-                    alignment: e.target.value,
-                  })
-                }
-                options={[
-                  { value: 'none', label: 'None' },
-                  { value: 'horizontal', label: 'Horizontal' },
-                  { value: 'vertical', label: 'Vertical' },
-                ]}
-              />
-              <Input
-                label="Notes (Optional)"
-                value={currentPanel.notes}
-                onChange={(e) =>
-                  setCurrentPanel({ ...currentPanel, notes: e.target.value })
-                }
-                placeholder="Additional notes..."
-              />
-              {currentPanel.width && currentPanel.length && (
-                <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded">
-                  Area per panel:{' '}
-                  <strong>
-                    {(
-                      (Number(currentPanel.width) *
-                        Number(currentPanel.length)) /
-                      1000000
-                    ).toFixed(2)}{' '}
-                    m²
-                  </strong>
-                  {currentPanel.quantity &&
-                    ` × ${currentPanel.quantity} = ${(
-                      (Number(currentPanel.width) *
-                        Number(currentPanel.length) *
-                        Number(currentPanel.quantity)) /
-                      1000000
-                    ).toFixed(2)} m²`}
-                </div>
-              )}
-            </div>
-          </Card>
-
           {/* Board selection */}
           <Card
             title="Board Selection"
-            subtitle="Choose core, thickness, company, and color"
+            subtitle="Choose core, thickness, company, and color (applies to new rows)"
             hover
           >
-            {errors.core ||
-            errors.thickness ||
-            errors.company ||
-            errors.color ? (
+            {(errors.core ||
+              errors.thickness ||
+              errors.company ||
+              errors.color) && (
               <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-600">
-                Please complete all board selections
+                Please complete all board selections for new rows.
               </div>
-            ) : null}
+            )}
 
             <div className="space-y-6">
               <div>
@@ -393,7 +309,7 @@ export function StepPanels({
               {currentBoard.core_type && (
                 <div className="bg-gray-50 p-4 rounded-lg">
                   <h4 className="text-xs font-medium text-gray-500 mb-2 uppercase">
-                    Current Selection
+                    Current Board for New Rows
                   </h4>
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>
@@ -420,166 +336,21 @@ export function StepPanels({
             </div>
           </Card>
 
-          {/* Panel Edges */}
-          <Card
-            title="Panel Edges"
-            subtitle={`Current panel: ${currentPanel.width || '0'}mm × ${
-              currentPanel.length || '0'
-            }mm`}
-            hover
-          >
-            <div className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                {(['top', 'right', 'bottom', 'left'] as const).map((edge) => (
-                  <button
-                    key={edge}
-                    onClick={() =>
-                      setCurrentEdges({
-                        ...currentEdges,
-                        [edge]: !currentEdges[edge],
-                      })
-                    }
-                    className={`px-4 py-2 rounded-lg border-2 font-medium text-sm transition-all ${
-                      currentEdges[edge]
-                        ? 'border-orange-600 bg-orange-50 text-orange-700'
-                        : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
-                    }`}
-                  >
-                    {currentEdges[edge] && (
-                      <Check className="inline w-4 h-4 mr-1" />
-                    )}
-                    {edge.charAt(0).toUpperCase() + edge.slice(1)}
-                  </button>
-                ))}
+          {/* Add row button */}
+          <Card hover>
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-600">
+                <p className="font-medium text-gray-900">Panel Rows</p>
+                <p>
+                  Define panels directly in the table on the right. Each new row
+                  uses the current board selection.
+                </p>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  const allSelected = Object.values(currentEdges).every(
-                    (v) => v,
-                  );
-                  setCurrentEdges({
-                    top: !allSelected,
-                    right: !allSelected,
-                    bottom: !allSelected,
-                    left: !allSelected,
-                  });
-                }}
-              >
-                Toggle All Edges
+              <Button onClick={addPanelRow}>
+                <Plus className="w-4 h-4 mr-1" />
+                Add Row
               </Button>
             </div>
-          </Card>
-
-          {/* Actions */}
-          <div className="flex gap-3">
-            <Button onClick={addPanel} fullWidth>
-              <Plus className="w-5 h-5" />
-              Add Panel & New
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setCurrentPanel({
-                  label: '',
-                  width: '',
-                  length: '',
-                  quantity: '1',
-                  alignment: 'none',
-                  notes: '',
-                });
-                setCurrentBoard({});
-                setCurrentEdges({
-                  top: false,
-                  right: false,
-                  bottom: false,
-                  left: false,
-                });
-                setErrors({});
-              }}
-            >
-              Clear Form
-            </Button>
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN: panels list, options, supply & customer */}
-        <div className="space-y-6">
-          {/* Panels table */}
-          <Card
-            title="Panels Added"
-            hover
-            actions={
-              <div className="text-sm text-gray-600">
-                <div>
-                  <strong>{panels.length}</strong> unique panels
-                </div>
-                <div>
-                  <strong>{totalPieces}</strong> total pieces
-                </div>
-                <div>
-                  <strong>{totalArea.toFixed(2)}</strong> m² total area
-                </div>
-              </div>
-            }
-          >
-            {panels.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">
-                No panels added yet
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse">
-                  <thead className="bg-gray-50 border-b">
-                    <tr>
-                      <th className="px-3 py-2 text-left">#</th>
-                      <th className="px-3 py-2 text-left">Label</th>
-                      <th className="px-3 py-2 text-left">Size (mm)</th>
-                      <th className="px-3 py-2 text-left">Qty</th>
-                      <th className="px-3 py-2 text-left">Board</th>
-                      <th className="px-3 py-2 text-left">Edges</th>
-                      <th className="px-3 py-2"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {panels.map((panel, idx) => {
-                      const appliedEdges = Object.entries(panel.edges || {})
-                        .filter(([, v]) => v)
-                        .map(([k]) => k[0].toUpperCase())
-                        .join('');
-                      return (
-                        <tr key={panel.id} className="border-b border-gray-100">
-                          <td className="px-3 py-3">{idx + 1}</td>
-                          <td className="px-3 py-3 font-medium">
-                            {panel.label}
-                          </td>
-                          <td className="px-3 py-3">
-                            {panel.width} × {panel.length}
-                          </td>
-                          <td className="px-3 py-3">{panel.quantity}</td>
-                          <td className="px-3 py-3 text-xs">
-                            {panel.board.company}{' '}
-                            {panel.board.thickness_mm}mm
-                          </td>
-                          <td className="px-3 py-3 text-xs">
-                            {appliedEdges || 'None'}
-                          </td>
-                          <td className="px-3 py-3">
-                            <button
-                              onClick={() => deletePanel(panel.id)}
-                              className="text-red-500 hover:text-red-700"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </Card>
 
           {/* Options */}
@@ -640,7 +411,7 @@ export function StepPanels({
           <Card title="Supply & Customer" hover>
             <div className="space-y-6">
               <div>
-                <label className="block text_sm font-medium text-gray-700 mb-3 uppercase">
+                <label className="block text-sm font-medium text-gray-700 mb-3 uppercase">
                   Supply Mode
                 </label>
                 <div className="grid grid-cols-2 gap-3">
@@ -757,6 +528,193 @@ export function StepPanels({
                 />
               </div>
             </div>
+          </Card>
+        </div>
+
+        {/* RIGHT COLUMN: Advanced panels table */}
+        <div className="space-y-6">
+          <Card
+            title="Panels"
+            subtitle="Edit your panels directly in this table"
+            hover
+            actions={
+              <div className="text-sm text-gray-600 text-right">
+                <div>
+                  <strong>{panels.length}</strong> unique panels
+                </div>
+                <div>
+                  <strong>{totalPieces}</strong> total pieces
+                </div>
+                <div>
+                  <strong>{totalArea.toFixed(2)}</strong> m² total area
+                </div>
+              </div>
+            }
+          >
+            {panels.length === 0 ? (
+              <p className="text-gray-500 text-center py-8">
+                No panels yet. Use <strong>Add Row</strong> after selecting a
+                board.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs sm:text-sm border-collapse">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-3 py-2 text-left">#</th>
+                      <th className="px-3 py-2 text-left">Label</th>
+                      <th className="px-3 py-2 text-left">Length (mm)</th>
+                      <th className="px-3 py-2 text-left">Width (mm)</th>
+                      <th className="px-3 py-2 text-left">Qty</th>
+                      <th className="px-3 py-2 text-left">Material</th>
+                      <th className="px-3 py-2 text-left">Edges</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {panels.map((panel, idx) => {
+                      const edges = panel.edges || {
+                        top: false,
+                        right: false,
+                        bottom: false,
+                        left: false,
+                      };
+
+                      return (
+                        <tr
+                          key={panel.id}
+                          className="border-b border-gray-100 hover:bg-gray-50/70 transition-colors"
+                        >
+                          <td className="px-3 py-2 align-middle">
+                            {idx + 1}
+                          </td>
+
+                          {/* Label */}
+                          <td className="px-3 py-2 align-middle">
+                            <Input
+                              value={panel.label}
+                              onChange={(e) =>
+                                updatePanelField(
+                                  panel.id,
+                                  'label',
+                                  e.target.value,
+                                )
+                              }
+                              placeholder="Label"
+                              className="h-8 text-xs sm:text-sm"
+                            />
+                          </td>
+
+                          {/* Length */}
+                          <td className="px-3 py-2 align-middle">
+                            <Input
+                              type="number"
+                              value={panel.length || ''}
+                              onChange={(e) =>
+                                updatePanelField(
+                                  panel.id,
+                                  'length',
+                                  e.target.value,
+                                )
+                              }
+                              placeholder="Length"
+                              className="h-8 text-xs sm:text-sm"
+                            />
+                          </td>
+
+                          {/* Width */}
+                          <td className="px-3 py-2 align-middle">
+                            <Input
+                              type="number"
+                              value={panel.width || ''}
+                              onChange={(e) =>
+                                updatePanelField(
+                                  panel.id,
+                                  'width',
+                                  e.target.value,
+                                )
+                              }
+                              placeholder="Width"
+                              className="h-8 text-xs sm:text-sm"
+                            />
+                          </td>
+
+                          {/* Quantity */}
+                          <td className="px-3 py-2 align-middle">
+                            <Input
+                              type="number"
+                              value={panel.quantity || ''}
+                              onChange={(e) =>
+                                updatePanelField(
+                                  panel.id,
+                                  'quantity',
+                                  e.target.value,
+                                )
+                              }
+                              placeholder="Qty"
+                              className="h-8 text-xs sm:text-sm"
+                            />
+                          </td>
+
+                          {/* Material summary */}
+                          <td className="px-3 py-2 align-middle text-[10px] sm:text-xs">
+                            <div className="whitespace-nowrap">
+                              <span className="font-medium">
+                                {panel.board.company}
+                              </span>{' '}
+                              {panel.board.thickness_mm}mm
+                            </div>
+                            <div className="text-gray-500 truncate max-w-[140px]">
+                              {panel.board.color_name}
+                            </div>
+                          </td>
+
+                          {/* Edges (T/R/B/L toggles) */}
+                          <td className="px-3 py-2 align-middle">
+                            <div className="flex gap-1">
+                              {(
+                                [
+                                  ['T', 'top'],
+                                  ['R', 'right'],
+                                  ['B', 'bottom'],
+                                  ['L', 'left'],
+                                ] as const
+                              ).map(([label, key]) => (
+                                <button
+                                  key={key}
+                                  type="button"
+                                  onClick={() =>
+                                    togglePanelEdge(panel.id, key)
+                                  }
+                                  className={`w-6 h-6 flex items-center justify-center rounded text-[10px] border ${
+                                    edges[key]
+                                      ? 'bg-orange-500 text-white border-orange-500'
+                                      : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-100'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              ))}
+                            </div>
+                          </td>
+
+                          {/* Delete */}
+                          <td className="px-3 py-2 align-middle text-right">
+                            <button
+                              onClick={() => deletePanel(panel.id)}
+                              className="text-red-500 hover:text-red-700"
+                              type="button"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Card>
         </div>
       </div>
