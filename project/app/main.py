@@ -443,18 +443,28 @@ async def payment_status(order_id: str = Query(...)):
 # EMAIL TEST ENDPOINT
 # ---------------------------------------------------------------------------
 
+from fastapi.responses import JSONResponse
 
 @app.post("/api/test-email")
 async def test_email(to: str = Query(..., description="Destination email")):
     """
     Simple SMTP test: sends a basic HTML email to the given address.
+    If something goes wrong, return the error message in the JSON response.
     """
     logger.info("Sending test email to %s", to)
     subject = "PanelPro test email"
     html = "<h1>PanelPro Email Test</h1><p>If you see this, SMTP is working.</p>"
 
-    send_email(to_email=to, subject=subject, html_body=html)
-    return {"status": "sent", "to": to}
+    try:
+        send_email(to_email=to, subject=subject, html_body=html)
+        return {"status": "sent", "to": to}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to send test email: %s", exc)
+        # Return the error message so you can see what is wrong
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "detail": str(exc)},
+        )
 
 
 # ---------------------------------------------------------------------------
