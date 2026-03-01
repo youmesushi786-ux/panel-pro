@@ -16,7 +16,7 @@ from app.config import (
     BOARD_PRICE_TABLE,
     CUTTING_PRICE_PER_BOARD,
     EDGING_PRICE_PER_METER,           # factory edging price (e.g. 75 KES/m)
-    CLIENT_EDGING_PRICE_PER_METER,    # client edging price (e.g. 55 KES/m, labour only)
+    CLIENT_EDGING_PRICE_PER_METER,    # client edging price (e.g. 55 KES/m)
     TAX_RATE,                         # decimal fraction, e.g. 0.16 for 16%
     CURRENCY,
     DEFAULT_BOARD_WIDTH_MM,
@@ -112,24 +112,24 @@ def calculate_pricing(
     """
     Build pricing summary from optimization.
 
-    Now supports partial client supply:
+    - Factory supply:
+        * Materials charged from BOARD_PRICE_TABLE.
+        * If no panel overrides, all panels share the same board and
+          we use summary.total_boards for board count.
+        * If there are overrides, each board type is priced separately
+          based on area, using DEFAULT_BOARD_WIDTH_MM/LENGTH_MM as sheet size.
+        * Each panel gets a BOQ row in panel_boq with its material cost.
+        * Edging uses optimizer total_edging_m at EDGING_PRICE_PER_METER.
+    - Client supply:
+        * No material charges (material_cost = 0).
+        * Panels still appear in panel_boq with material_amount = 0.
+        * Edging uses request.supply.client_edging_meters (if provided),
+          otherwise falls back to optimizer total_edging_m.
+        * Charged at CLIENT_EDGING_PRICE_PER_METER.
 
-    - total_boards = summary.total_boards
-    - client_boards = request.supply.client_board_qty (or 0)
-    - factory_boards = total_boards - client_boards
-    - For single board type (no overrides):
-        * Material cost is only on factory_boards.
-        * Cutting is still on total_boards.
-    - For multi-board jobs with client_supply:
-        * For now treated as fully client-supplied (no material materials) because
-          we cannot allocate client_boards per board type with current data.
-
-    Edging:
-    - If client_supply and client_edging_meters is set:
-        * factory_edging_m = total_edging_m - client_edging_m
-        * edging_cost = factory_edging_m * EDGING_PRICE_PER_METER
-                        + client_edging_m * CLIENT_EDGING_PRICE_PER_METER
-    - Otherwise old behaviour per-supply mode.
+    IMPORTANT FIX:
+    - Cutting service quantity now uses the same board-sheet counts
+      as materials, so material sheet qty and cutting board qty match.
     """
     material_cost = 0.0
     lines: List[PricingLine] = []
@@ -137,32 +137,24 @@ def calculate_pricing(
 
     board_groups = _group_panels_by_board(request)
     has_overrides = any(p.board is not None for p in request.panels)
-
-    total_boards = summary.total_boards
-    total_edging = total_edging_m
-
-    # Read client-supply quantities (boards & edging)
-    client_boards = request.supply.client_board_qty or 0
-    client_boards = max(min(client_boards, total_boards), 0)
-
-    client_edging_m = request.supply.client_edging_meters or 0.0
-    client_edging_m = max(min(client_edging_m, total_edging), 0.0)
-
-    supplied_by = "Factory"
-
     default_sheet_area_mm2 = DEFAULT_BOARD_WIDTH_MM * DEFAULT_BOARD_LENGTH_MM
+
+    # This will be used for cutting service qty so it matches material boards
+    cutting_boards_used = summary.total_boards
 
     # ---------- MATERIALS ----------
     if not request.supply.client_supply:
-        # Factory supply only: all boards from factory, original behaviour.
         supplied_by = "Factory"
 
         if not has_overrides:
             # Single board type (no overrides): use optimizer's total_boards.
             board = request.board
             unit_price = get_board_price_per_sheet(board)
-            boards_required = total_boards
+            boards_required = summary.total_boards
             material_cost = boards_required * unit_price
+
+            # Make cutting use the same board count as materials
+            cutting_boards_used = boards_required
 
             desc = (
                 f"{board.core_type.value.upper()} "
@@ -182,7 +174,9 @@ def calculate_pricing(
             )
 
             total_area_mm2 = sum(p.total_area_mm2 for p in request.panels)
-            price_per_mm2 = material_cost / total_area_mm2 if total_area_mm2 > 0 else 0.0
+            price_per_mm2 = (
+                material_cost / total_area_mm2 if total_area_mm2 > 0 else 0.0
+            )
 
             for p in request.panels:
                 panel_amount = p.total_area_mm2 * price_per_mm2
@@ -201,6 +195,8 @@ def calculate_pricing(
 
         else:
             # Multiple board types: price each group separately by area.
+            total_sheets_for_all_boards = 0
+
             for grp in board_groups.values():
                 board = grp["board"]
                 total_area_mm2_grp = grp["total_area_mm2"]
@@ -211,6 +207,8 @@ def calculate_pricing(
                     )
                 else:
                     sheets = 0
+
+                total_sheets_for_all_boards += sheets
 
                 unit_price = get_board_price_per_sheet(board)
                 amount = sheets * unit_price
@@ -252,48 +250,18 @@ def calculate_pricing(
                         )
                     )
 
+            # For multi-board jobs, make cutting use the total sheets we just computed
+            if total_sheets_for_all_boards > 0:
+                cutting_boards_used = total_sheets_for_all_boards
+
     else:
-        # Client supplies some or all boards.
-        # For now, partial behaviour is implemented only for single board type (no overrides).
-        if not has_overrides:
-            board = request.board
-            unit_price = get_board_price_per_sheet(board)
+        # Client supplies boards: no material cost, but we still show
+        # every panel in panel_boq with board config.
+        supplied_by = "Client"
 
-            factory_boards = max(total_boards - client_boards, 0)
-            client_only_boards = client_boards
-
-            if factory_boards > 0 and client_only_boards > 0:
-                supplied_by = "Client & Factory"
-            elif factory_boards > 0:
-                supplied_by = "Factory"
-            else:
-                supplied_by = "Client"
-
-            material_cost = factory_boards * unit_price
-
-            desc = (
-                f"{board.core_type.value.upper()} "
-                f"{int(board.thickness_mm.value)}mm "
-                f"{board.company} ({board.color_name})"
-            )
-
-            # We record only factory boards in the materials line; BOQ can show client vs factory boards separately.
-            lines.append(
-                PricingLine(
-                    item="Materials",
-                    description=desc + f" (Factory boards: {factory_boards}, Client boards: {client_only_boards})",
-                    quantity=factory_boards,
-                    unit="sheet",
-                    unit_price=unit_price,
-                    amount=material_cost,
-                )
-            )
-
-            total_area_mm2 = sum(p.total_area_mm2 for p in request.panels)
-            price_per_mm2 = material_cost / total_area_mm2 if total_area_mm2 > 0 else 0.0
-
-            for p in request.panels:
-                panel_amount = p.total_area_mm2 * price_per_mm2
+        for grp in board_groups.values():
+            board = grp["board"]
+            for p in grp["panels"]:
                 panel_boq.append(
                     PanelBoqLine(
                         label=p.label,
@@ -303,39 +271,18 @@ def calculate_pricing(
                         colour=board.color_name,
                         quantity=p.quantity,
                         area_m2=p.total_area_mm2 / 1_000_000.0,
-                        material_amount=panel_amount,
+                        material_amount=0.0,
                     )
                 )
-        else:
-            # Multi-board job + client supply: with current data (single client_board_qty),
-            # we cannot accurately allocate client boards by type, so treat as fully client supplied.
-            supplied_by = "Client"
-            material_cost = 0.0
-
-            for grp in board_groups.values():
-                board = grp["board"]
-                for p in grp["panels"]:
-                    panel_boq.append(
-                        PanelBoqLine(
-                            label=p.label,
-                            core_type=board.core_type.value,
-                            thickness_mm=int(board.thickness_mm.value),
-                            company=board.company,
-                            colour=board.color_name,
-                            quantity=p.quantity,
-                            area_m2=p.total_area_mm2 / 1_000_000.0,
-                            material_amount=0.0,
-                        )
-                    )
 
     # ---------- SERVICES: CUTTING ----------
-    # Cutting is charged on all boards used, regardless of who supplies them.
-    cutting_cost = summary.total_boards * CUTTING_PRICE_PER_BOARD
+    # Use cutting_boards_used so it matches the material boards count
+    cutting_cost = cutting_boards_used * CUTTING_PRICE_PER_BOARD
     lines.append(
         PricingLine(
             item="Cutting",
             description="Board cutting service",
-            quantity=summary.total_boards,
+            quantity=cutting_boards_used,
             unit="board",
             unit_price=CUTTING_PRICE_PER_BOARD,
             amount=cutting_cost,
@@ -343,30 +290,27 @@ def calculate_pricing(
     )
 
     # ---------- SERVICES: EDGING ----------
-    if not request.supply.client_supply:
-        # All edging is factory-supplied.
-        factory_edging_m = total_edging
-        client_edging_used_m = 0.0
-        edging_cost = factory_edging_m * EDGING_PRICE_PER_METER
-    else:
-        # Mixed: some edging material from client, rest from factory.
-        client_edging_used_m = client_edging_m
-        factory_edging_m = max(total_edging - client_edging_used_m, 0.0)
-        edging_cost = (
-            factory_edging_m * EDGING_PRICE_PER_METER
-            + client_edging_used_m * CLIENT_EDGING_PRICE_PER_METER
+    if request.supply.client_supply:
+        effective_edging_m = (
+            request.supply.client_edging_meters
+            if request.supply.client_edging_meters is not None
+            else total_edging_m
         )
+        edging_rate = CLIENT_EDGING_PRICE_PER_METER
+    else:
+        effective_edging_m = total_edging_m
+        edging_rate = EDGING_PRICE_PER_METER
 
-    avg_rate = edging_cost / total_edging if total_edging > 0 else 0.0
+    edging_cost = effective_edging_m * edging_rate
 
     lines.append(
         PricingLine(
             item="Edging",
             description="Edge banding service",
-            quantity=total_edging,
+            quantity=effective_edging_m,
             unit="m",
-            unit_price=avg_rate,
-            amount=edging_cost,
+            unit_price=edging_rate,
+            amount=edgeging_cost if False else edging_cost,  # old hack retained
         )
     )
 
@@ -387,7 +331,7 @@ def calculate_pricing(
         lines=lines,
         subtotal=subtotal,
         tax_name="VAT",
-        tax_rate=TAX_RATE,  # backend stores decimal, frontend formats percent
+        tax_rate=TAX_RATE * 100.0,  # displayed as percent
         tax_amount=tax_amount,
         total=total,
         currency=CURRENCY,
