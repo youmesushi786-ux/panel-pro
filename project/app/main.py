@@ -29,6 +29,11 @@ from app.config import (
 )
 from app.mpesa import initiate_stk_push
 from app.email_utils import send_email, COMPANY_EMAIL
+from app.whatsapp_utils import send_whatsapp_message
+
+# ---------------------------------------------------------------------------
+# Logging setup
+# ---------------------------------------------------------------------------
 
 logger = logging.getLogger("panelpro")
 logging.basicConfig(
@@ -41,11 +46,12 @@ app = FastAPI(title="PanelPro - Cutting Optimizer")
 # ---------------------------------------------------------------------------
 # CORS
 # ---------------------------------------------------------------------------
+
 _allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
 if _allowed_origins_env:
     _origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
 else:
-    _origins = ["*"]  # dev default
+    _origins = ["*"]  # dev default; override with ALLOWED_ORIGINS in production
 
 app.add_middleware(
     CORSMiddleware,
@@ -114,7 +120,10 @@ async def validation_exception_handler(
     )
 
 
+# ---------------------------------------------------------------------------
 # In-memory stores (demo only)
+# ---------------------------------------------------------------------------
+
 ORDERS: dict[str, dict[str, Any]] = {}
 PAYMENTS: dict[str, dict[str, Any]] = {}
 PENDING_CHECKOUT: dict[str, str] = {}  # CheckoutRequestID -> order_id
@@ -132,6 +141,10 @@ async def health() -> HealthResponse:
 
 @app.get("/api/boards/catalog")
 async def boards_catalog() -> Dict[str, Any]:
+    """
+    Shape expected by the frontend:
+      { catalog: {...}, price_table: {...}, colors: {...} }
+    """
     return {
         "catalog": BOARD_CATALOG,
         "price_table": BOARD_PRICE_TABLE,
@@ -182,7 +195,7 @@ def build_boq(
             )
         )
 
-    # Client vs factory boards for BOQ
+    # Compute client vs factory boards for BOQ display (simple: only one global board here)
     client_boards = request.supply.client_board_qty or 0
     client_boards = max(min(client_boards, optimization.total_boards), 0)
     factory_boards = max(optimization.total_boards - client_boards, 0)
@@ -201,10 +214,6 @@ def build_boq(
     cutting_line = next((l for l in pricing.lines if l.item == "Cutting"), None)
     edging_line = next((l for l in pricing.lines if l.item == "Edging"), None)
 
-    # Compute effective edging rate used at pricing
-    edging_rate = EDGING_PRICE_PER_METER
-    client_edging_rate = CLIENT_EDGING_PRICE_PER_METER
-
     services = {
         "cutting": {
             "boards": optimization.total_boards,
@@ -213,7 +222,7 @@ def build_boq(
         },
         "edging": {
             "meters": edging.total_meters,
-            "price_per_meter": edging_rate,  # display only (mixed in pricing)
+            "price_per_meter": EDGING_PRICE_PER_METER,
             "total": edging_line.amount if edging_line else 0.0,
         },
     }
@@ -254,7 +263,7 @@ async def api_optimize(req: CuttingRequest) -> CuttingResponse:
         },
         optimization=optimization,
         layouts=boards,
-        edging=edgeging_summary if False else edging_summary,  # keep linter happy
+        edging=edgeging_summary if False else edging_summary,  # always uses edging_summary
         boq=boq,
         report_id=report_id,
     )
@@ -267,41 +276,41 @@ async def api_optimize(req: CuttingRequest) -> CuttingResponse:
 
 @app.post("/api/order/create")
 async def order_create(req: CuttingRequest):
-  """
-  Create an order and calculate the payable amount.
-  Frontend calls this before initiating M-Pesa.
-  """
-  logger.info(
-      "Creating order for project=%s customer=%s",
-      req.project_name,
-      req.customer_name,
-  )
+    """
+    Create an order and calculate the payable amount.
+    Frontend calls this before initiating M-Pesa.
+    """
+    logger.info(
+        "Creating order for project=%s customer=%s",
+        req.project_name,
+        req.customer_name,
+    )
 
-  _, optimization, edging_summary = run_optimization(req)
-  pricing = calculate_pricing(req, optimization, edging_summary.total_meters)
+    _, optimization, edging_summary = run_optimization(req)
+    pricing = calculate_pricing(req, optimization, edging_summary.total_meters)
 
-  order_id = f"ORD-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
-  ORDERS[order_id] = {
-      "amount": pricing.total,
-      "currency": pricing.currency,
-      "status": "created",
-      "created_at": datetime.utcnow().isoformat(),
-      "project_name": req.project_name,
-      "customer_name": req.customer_name,
-      "customer_email": req.customer_email,
-      "customer_phone": req.customer_phone,
-      "request": req,
-  }
-  PAYMENTS[order_id] = {
-      "status": "pending",
-  }
+    order_id = f"ORD-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    ORDERS[order_id] = {
+        "amount": pricing.total,
+        "currency": pricing.currency,
+        "status": "created",
+        "created_at": datetime.utcnow().isoformat(),
+        "project_name": req.project_name,
+        "customer_name": req.customer_name,
+        "customer_email": req.customer_email,
+        "customer_phone": req.customer_phone,
+        "request": req,
+    }
+    PAYMENTS[order_id] = {
+        "status": "pending",
+    }
 
-  return {
-      "order_id": order_id,
-      "amount": pricing.total,
-      "currency": pricing.currency,
-      "status": "created",
-  }
+    return {
+        "order_id": order_id,
+        "amount": pricing.total,
+        "currency": pricing.currency,
+        "status": "created",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -422,7 +431,7 @@ async def payment_status(order_id: str = Query(...)):
 
 
 # ---------------------------------------------------------------------------
-# EMAIL TEST & NOTIFY-AFTER-PAYMENT
+# EMAIL / WHATSAPP TEST ENDPOINTS
 # ---------------------------------------------------------------------------
 
 
@@ -443,6 +452,28 @@ async def test_email(to: str = Query(..., description="Destination email")):
         )
 
 
+@app.post("/api/test-whatsapp")
+async def test_whatsapp(
+    phone: str = Query(..., description="Customer phone, e.g. 2547xxxxxxx"),
+):
+    logger.info("Sending test WhatsApp to %s", phone)
+    msg_id = send_whatsapp_message(
+        phone,
+        "PanelPro test WhatsApp message. If you see this, WhatsApp Cloud API is working.",
+    )
+    if msg_id:
+        return {"status": "sent", "id": msg_id}
+    return JSONResponse(
+        status_code=500,
+        content={"status": "error", "detail": "Failed to send WhatsApp message"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# NOTIFY AFTER PAYMENT
+# ---------------------------------------------------------------------------
+
+
 @app.post("/api/notify/after-payment")
 async def notify_after_payment(payload: Dict[str, Any]):
     """
@@ -456,6 +487,11 @@ async def notify_after_payment(payload: Dict[str, Any]):
         "customer_email": "...",
         "customer_phone": "..."
       }
+
+    Behaviour:
+      - Send a confirmation/invoice email to the customer_email.
+      - Send a job summary email to COMPANY_EMAIL.
+      - Send a WhatsApp notification to customer_phone.
     """
     logger.info("notify_after_payment payload=%s", payload)
 
@@ -473,7 +509,7 @@ async def notify_after_payment(payload: Dict[str, Any]):
     payment_status = payment["status"] if payment else "unknown"
     mpesa_receipt = payment.get("mpesa_receipt") if payment else None
 
-    # Customer email
+    # 1) Email to customer
     customer_email_sent = False
     if customer_email:
         subject_c = f"Invoice for {project_name or 'your project'}"
@@ -491,7 +527,7 @@ async def notify_after_payment(payload: Dict[str, Any]):
         except Exception as exc:  # noqa: BLE001
             logger.exception("Failed to send customer email: %s", exc)
 
-    # Company email
+    # 2) Email to company
     subject_i = f"[PANELPRO JOB] {project_name or order_id or 'New Job'}"
     html_i = f"""
     <h2>New Cutting Job Paid</h2>
@@ -512,9 +548,21 @@ async def notify_after_payment(payload: Dict[str, Any]):
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to send company email: %s", exc)
 
+    # 3) WhatsApp to customer
+    whatsapp_sid = None
+    if customer_phone:
+        wa_message = (
+            f"PanelPro: Payment received for project '{project_name or order_id}'.\n"
+            f"Amount: {amount:.2f} {currency}\n"
+            f"Status: {payment_status}\n"
+            f"Mpesa Receipt: {mpesa_receipt or 'N/A'}"
+        )
+        whatsapp_sid = send_whatsapp_message(customer_phone, wa_message)
+
     return {
         "status": "ok",
         "message": "Notifications processed.",
         "customer_email_sent": customer_email_sent,
         "company_email_sent": company_email_sent,
+        "whatsapp_sid": whatsapp_sid,
     }
