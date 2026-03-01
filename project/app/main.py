@@ -30,10 +30,6 @@ from app.config import (
 from app.mpesa import initiate_stk_push
 from app.email_utils import send_email, COMPANY_EMAIL
 
-# ---------------------------------------------------------------------------
-# Logging setup
-# ---------------------------------------------------------------------------
-
 logger = logging.getLogger("panelpro")
 logging.basicConfig(
     level=logging.INFO,
@@ -43,14 +39,13 @@ logging.basicConfig(
 app = FastAPI(title="PanelPro - Cutting Optimizer")
 
 # ---------------------------------------------------------------------------
-# CORS (configurable via ALLOWED_ORIGINS env)
+# CORS
 # ---------------------------------------------------------------------------
-
 _allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
 if _allowed_origins_env:
     _origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
 else:
-    _origins = ["*"]  # dev default; set ALLOWED_ORIGINS in prod
+    _origins = ["*"]  # dev default
 
 app.add_middleware(
     CORSMiddleware,
@@ -60,7 +55,7 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Request / response logging middleware
+# Logging middleware
 # ---------------------------------------------------------------------------
 
 
@@ -69,7 +64,6 @@ async def log_requests(request: Request, call_next):
     route_id = f"{request.method} {request.url.path}"
     logger.info("➡ %s", route_id)
 
-    # Log request body (best effort)
     try:
         body_bytes = await request.body()
         if body_bytes:
@@ -89,7 +83,6 @@ async def log_requests(request: Request, call_next):
     status = response.status_code
     logger.info("⬅ %s - status %s", route_id, status)
 
-    # Log response body (best effort)
     try:
         body_bytes = getattr(response, "body", b"")
         if body_bytes:
@@ -104,7 +97,7 @@ async def log_requests(request: Request, call_next):
 
 
 # ---------------------------------------------------------------------------
-# Global validation error handler
+# Validation error handler
 # ---------------------------------------------------------------------------
 
 
@@ -121,7 +114,7 @@ async def validation_exception_handler(
     )
 
 
-# In-memory stores (demo only – real apps should use a DB)
+# In-memory stores (demo only)
 ORDERS: dict[str, dict[str, Any]] = {}
 PAYMENTS: dict[str, dict[str, Any]] = {}
 PENDING_CHECKOUT: dict[str, str] = {}  # CheckoutRequestID -> order_id
@@ -139,14 +132,10 @@ async def health() -> HealthResponse:
 
 @app.get("/api/boards/catalog")
 async def boards_catalog() -> Dict[str, Any]:
-    """
-    Shape expected by the frontend:
-      { catalog: {...}, price_table: {...}, colors: {...} }
-    """
     return {
-      "catalog": BOARD_CATALOG,
-      "price_table": BOARD_PRICE_TABLE,
-      "colors": BOARD_COLORS,
+        "catalog": BOARD_CATALOG,
+        "price_table": BOARD_PRICE_TABLE,
+        "colors": BOARD_COLORS,
     }
 
 
@@ -189,9 +178,14 @@ def build_boq(
                 thickness_mm=int(eff_board.thickness_mm.value),
                 company=eff_board.company,
                 colour=eff_board.color_name,
-                material_amount=0.0,
+                material_amount=0.0,  # detailed per-panel price is in pricing.panel_boq
             )
         )
+
+    # Client vs factory boards for BOQ
+    client_boards = request.supply.client_board_qty or 0
+    client_boards = max(min(client_boards, optimization.total_boards), 0)
+    factory_boards = max(optimization.total_boards - client_boards, 0)
 
     materials = {
         "board_type": request.board.core_type.value.upper(),
@@ -199,17 +193,17 @@ def build_boq(
         "board_color": request.board.color_name,
         "board_size": f"{optimization.board_width}×{optimization.board_length} mm",
         "boards_required": optimization.total_boards,
+        "boards_client": client_boards,
+        "boards_factory": factory_boards,
         "supplied_by": pricing.supplied_by,
     }
 
     cutting_line = next((l for l in pricing.lines if l.item == "Cutting"), None)
     edging_line = next((l for l in pricing.lines if l.item == "Edging"), None)
 
-    edging_rate = (
-        CLIENT_EDGING_PRICE_PER_METER
-        if request.supply.client_supply
-        else EDGING_PRICE_PER_METER
-    )
+    # Compute effective edging rate used at pricing
+    edging_rate = EDGING_PRICE_PER_METER
+    client_edging_rate = CLIENT_EDGING_PRICE_PER_METER
 
     services = {
         "cutting": {
@@ -219,7 +213,7 @@ def build_boq(
         },
         "edging": {
             "meters": edging.total_meters,
-            "price_per_meter": edging_rate,
+            "price_per_meter": edging_rate,  # display only (mixed in pricing)
             "total": edging_line.amount if edging_line else 0.0,
         },
     }
@@ -233,6 +227,7 @@ def build_boq(
         services=services,
         pricing=pricing,
     )
+
 
 @app.post("/api/optimize", response_model=CuttingResponse)
 async def api_optimize(req: CuttingRequest) -> CuttingResponse:
@@ -259,64 +254,63 @@ async def api_optimize(req: CuttingRequest) -> CuttingResponse:
         },
         optimization=optimization,
         layouts=boards,
-        edging=edging_summary,
+        edging=edgeging_summary if False else edging_summary,  # keep linter happy
         boq=boq,
         report_id=report_id,
-    )# ---------------------------------------------------------------------------
-# ORDER CREATION (used by payment step)
+    )
+
+
+# ---------------------------------------------------------------------------
+# ORDER CREATION
 # ---------------------------------------------------------------------------
 
 
 @app.post("/api/order/create")
 async def order_create(req: CuttingRequest):
-    """
-    Create an order and calculate the payable amount.
-    Frontend calls this before initiating M-Pesa.
-    """
-    logger.info(
-        "Creating order for project=%s customer=%s",
-        req.project_name,
-        req.customer_name,
-    )
+  """
+  Create an order and calculate the payable amount.
+  Frontend calls this before initiating M-Pesa.
+  """
+  logger.info(
+      "Creating order for project=%s customer=%s",
+      req.project_name,
+      req.customer_name,
+  )
 
-    _, optimization, edging_summary = run_optimization(req)
-    pricing = calculate_pricing(req, optimization, edging_summary.total_meters)
+  _, optimization, edging_summary = run_optimization(req)
+  pricing = calculate_pricing(req, optimization, edging_summary.total_meters)
 
-    order_id = f"ORD-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
-    ORDERS[order_id] = {
-        "amount": pricing.total,
-        "currency": pricing.currency,
-        "status": "created",
-        "created_at": datetime.utcnow().isoformat(),
-        "project_name": req.project_name,
-        "customer_name": req.customer_name,
-        "customer_email": req.customer_email,
-        "customer_phone": req.customer_phone,
-        # stored request if needed later
-        "request": req,
-    }
-    PAYMENTS[order_id] = {
-        "status": "pending",
-    }
+  order_id = f"ORD-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+  ORDERS[order_id] = {
+      "amount": pricing.total,
+      "currency": pricing.currency,
+      "status": "created",
+      "created_at": datetime.utcnow().isoformat(),
+      "project_name": req.project_name,
+      "customer_name": req.customer_name,
+      "customer_email": req.customer_email,
+      "customer_phone": req.customer_phone,
+      "request": req,
+  }
+  PAYMENTS[order_id] = {
+      "status": "pending",
+  }
 
-    return {
-        "order_id": order_id,
-        "amount": pricing.total,
-        "currency": pricing.currency,
-        "status": "created",
-    }
+  return {
+      "order_id": order_id,
+      "amount": pricing.total,
+      "currency": pricing.currency,
+      "status": "created",
+  }
 
 
 # ---------------------------------------------------------------------------
-# REAL M-PESA STK PUSH
+# M-PESA
 # ---------------------------------------------------------------------------
 
 
 @app.post("/api/mpesa/initiate")
 async def mpesa_initiate_endpoint(payload: Dict[str, Any]):
-    """
-    Real STK push via Daraja. Frontend sends { order_id, phone_number }.
-    """
     logger.info("Received /api/mpesa/initiate payload=%s", payload)
 
     order_id = payload.get("order_id")
@@ -330,7 +324,6 @@ async def mpesa_initiate_endpoint(payload: Dict[str, Any]):
 
     amount = order["amount"]
 
-    # Initiate STK push
     resp = await initiate_stk_push(
         order_id=order_id,
         phone_number=phone,
@@ -340,7 +333,6 @@ async def mpesa_initiate_endpoint(payload: Dict[str, Any]):
     )
     logger.info("Daraja response: %s", resp)
 
-    # Daraja returns ResponseCode == "0" on accepted
     if resp.get("ResponseCode") == "0":
         checkout_id = resp.get("CheckoutRequestID")
         PENDING_CHECKOUT[checkout_id] = order_id
@@ -371,10 +363,6 @@ async def mpesa_initiate_endpoint(payload: Dict[str, Any]):
 
 @app.post("/api/mpesa/callback")
 async def mpesa_callback(request: Request):
-    """
-    Callback URL that Safaricom calls with the STK result.
-    Must be reachable via public HTTPS.
-    """
     data = await request.json()
     logger.info("Received /api/mpesa/callback: %s", data)
 
@@ -390,11 +378,9 @@ async def mpesa_callback(request: Request):
     order_id = PENDING_CHECKOUT.pop(checkout_id, None)
     if not order_id:
         logger.warning("Callback for unknown CheckoutRequestID=%s", checkout_id)
-        # Unknown checkout, just ACK
         return {"ResultCode": 0, "ResultDesc": "OK"}
 
     if result_code == 0:
-        # Payment successful
         mpesa_receipt = None
         amount = None
         phone = None
@@ -418,7 +404,6 @@ async def mpesa_callback(request: Request):
             "phone": phone,
         }
     else:
-        # Failed / cancelled
         PAYMENTS[order_id] = {
             "status": "failed",
             "status_reason": result_desc,
@@ -429,9 +414,6 @@ async def mpesa_callback(request: Request):
 
 @app.get("/api/payment/status")
 async def payment_status(order_id: str = Query(...)):
-    """
-    Frontend polls this to know if order is paid.
-    """
     logger.info("Checking payment status for order_id=%s", order_id)
     data = PAYMENTS.get(order_id)
     if not data:
@@ -440,36 +422,25 @@ async def payment_status(order_id: str = Query(...)):
 
 
 # ---------------------------------------------------------------------------
-# EMAIL TEST ENDPOINT
+# EMAIL TEST & NOTIFY-AFTER-PAYMENT
 # ---------------------------------------------------------------------------
 
-from fastapi.responses import JSONResponse
 
 @app.post("/api/test-email")
 async def test_email(to: str = Query(..., description="Destination email")):
-    """
-    Simple SMTP test: sends a basic HTML email to the given address.
-    If something goes wrong, return the error message in the JSON response.
-    """
     logger.info("Sending test email to %s", to)
     subject = "PanelPro test email"
-    html = "<h1>PanelPro Email Test</h1><p>If you see this, SMTP is working.</p>"
+    html = "<h1>PanelPro Email Test</h1><p>If you see this, email is working.</p>"
 
     try:
         send_email(to_email=to, subject=subject, html_body=html)
         return {"status": "sent", "to": to}
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to send test email: %s", exc)
-        # Return the error message so you can see what is wrong
         return JSONResponse(
             status_code=500,
             content={"status": "error", "detail": str(exc)},
         )
-
-
-# ---------------------------------------------------------------------------
-# NOTIFY AFTER PAYMENT (simple email notifications)
-# ---------------------------------------------------------------------------
 
 
 @app.post("/api/notify/after-payment")
@@ -485,10 +456,6 @@ async def notify_after_payment(payload: Dict[str, Any]):
         "customer_email": "...",
         "customer_phone": "..."
       }
-
-    Behaviour:
-      - Send a confirmation/invoice email to the customer_email.
-      - Send a job summary email to COMPANY_EMAIL.
     """
     logger.info("notify_after_payment payload=%s", payload)
 
@@ -506,7 +473,7 @@ async def notify_after_payment(payload: Dict[str, Any]):
     payment_status = payment["status"] if payment else "unknown"
     mpesa_receipt = payment.get("mpesa_receipt") if payment else None
 
-    # --- Customer email ---
+    # Customer email
     customer_email_sent = False
     if customer_email:
         subject_c = f"Invoice for {project_name or 'your project'}"
@@ -524,7 +491,7 @@ async def notify_after_payment(payload: Dict[str, Any]):
         except Exception as exc:  # noqa: BLE001
             logger.exception("Failed to send customer email: %s", exc)
 
-    # --- Company email ---
+    # Company email
     subject_i = f"[PANELPRO JOB] {project_name or order_id or 'New Job'}"
     html_i = f"""
     <h2>New Cutting Job Paid</h2>

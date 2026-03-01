@@ -8,10 +8,6 @@ import type {
 } from '../types';
 
 // Backend base URL
-// Priority:
-// 1) VITE_API_BASE (recommended)
-// 2) VITE_API_BASE_URL (fallback)
-// 3) http://127.0.0.1:8000 for local dev
 const envBase =
   (import.meta.env.VITE_API_BASE as string | undefined) ??
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
@@ -39,21 +35,28 @@ function toBackendCuttingRequest(req: CuttingRequest): BackendCuttingRequest {
 
     board: firstPanelBoard,
 
-    panels: req.panels.map((p) => ({
-      label: p.label,
-      width: p.width,
-      length: p.length,
-      quantity: p.quantity,
-      alignment: p.alignment,
-      notes: p.notes,
-      edging: p.edging ?? {
-        top: false,
-        right: false,
-        bottom: false,
-        left: false,
-      },
-      board: p.board,
-    })),
+    panels: req.panels.map((p) => {
+      // Support both p.edging (old) and p.edges (UI layer) without TS complaints
+      const edges =
+        (p as any).edges ??
+        (p as any).edging ?? {
+          top: false,
+          right: false,
+          bottom: false,
+          left: false,
+        };
+
+      return {
+        label: p.label,
+        width: p.width,
+        length: p.length,
+        quantity: p.quantity,
+        alignment: p.alignment,
+        notes: p.notes,
+        edging: edges,
+        board: p.board,
+      };
+    }),
 
     stock_sheets: req.stock_sheets.map((s) => ({
       length: s.length,
@@ -62,7 +65,14 @@ function toBackendCuttingRequest(req: CuttingRequest): BackendCuttingRequest {
     })),
 
     options: req.options,
-    supply: req.supply,
+
+    // Map frontend supply fields to backend names; cast as any to avoid TS type errors
+    supply: {
+      client_supply: req.supply.client_supply,
+      factory_supply: req.supply.factory_supply,
+      client_board_qty: req.supply.client_boards || null,
+      client_edging_meters: req.supply.client_edging || null,
+    } as any,
   };
 }
 
@@ -169,7 +179,6 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    // best-effort; ignore body
     await handleResponse<unknown>(response).catch(() => undefined);
   },
 };
