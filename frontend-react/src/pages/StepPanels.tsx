@@ -21,8 +21,8 @@ import type {
 interface StepPanelsProps {
   panels: Panel[];
   onPanelsChange: (panels: Panel[]) => void;
-  stockSheets: StockSheet[];
-  onStockSheetsChange: (sheets: StockSheet[]) => void;
+  stockSheets: StockSheet[]; // kept for compatibility but not used
+  onStockSheetsChange: (sheets: StockSheet[]) => void; // kept for compatibility but not used
   options: OptimizationOptions;
   onOptionsChange: (options: OptimizationOptions) => void;
   customer: CustomerDetails;
@@ -35,8 +35,8 @@ interface StepPanelsProps {
 export function StepPanels({
   panels,
   onPanelsChange,
-  stockSheets,
-  onStockSheetsChange,
+  stockSheets, // unused now
+  onStockSheetsChange, // unused now
   options,
   onOptionsChange,
   customer,
@@ -76,7 +76,7 @@ export function StepPanels({
       .catch((err) => {
         console.error('Error loading board catalog:', err);
         setCatalogError(
-          err instanceof Error ? err.message : 'Failed to load board catalog'
+          err instanceof Error ? err.message : 'Failed to load board catalog',
         );
       });
   }, []);
@@ -132,28 +132,9 @@ export function StepPanels({
     onPanelsChange(panels.filter((p) => p.id !== id));
   };
 
-  const addStockSheet = () => {
-    onStockSheetsChange([
-      ...stockSheets,
-      { id: Date.now().toString(), length: 2440, width: 1220, quantity: 1 },
-    ]);
-  };
-
-  const updateStockSheet = (id: string, field: string, value: number) => {
-    onStockSheetsChange(
-      stockSheets.map((sheet) =>
-        sheet.id === id ? { ...sheet, [field]: value } : sheet
-      )
-    );
-  };
-
-  const deleteStockSheet = (id: string) => {
-    onStockSheetsChange(stockSheets.filter((s) => s.id !== id));
-  };
-
   const totalArea = panels.reduce(
     (sum, p) => sum + (p.width * p.length * p.quantity) / 1000000,
-    0
+    0,
   );
   const totalPieces = panels.reduce((sum, p) => sum + p.quantity, 0);
 
@@ -200,6 +181,7 @@ export function StepPanels({
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <div className="space-y-6">
+          {/* New Panel form */}
           <Card title="New Panel" hover>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -294,6 +276,7 @@ export function StepPanels({
             </div>
           </Card>
 
+          {/* Board selection */}
           <Card
             title="Board Selection"
             subtitle="Choose core, thickness, company, and color"
@@ -437,6 +420,7 @@ export function StepPanels({
             </div>
           </Card>
 
+          {/* Panel Edges */}
           <Card
             title="Panel Edges"
             subtitle={`Current panel: ${currentPanel.width || '0'}mm × ${
@@ -473,7 +457,7 @@ export function StepPanels({
                 size="sm"
                 onClick={() => {
                   const allSelected = Object.values(currentEdges).every(
-                    (v) => v
+                    (v) => v,
                   );
                   setCurrentEdges({
                     top: !allSelected,
@@ -488,6 +472,7 @@ export function StepPanels({
             </div>
           </Card>
 
+          {/* Actions */}
           <div className="flex gap-3">
             <Button onClick={addPanel} fullWidth>
               <Plus className="w-5 h-5" />
@@ -519,7 +504,9 @@ export function StepPanels({
           </div>
         </div>
 
+        {/* RIGHT COLUMN: panels list, options, supply & customer */}
         <div className="space-y-6">
+          {/* Panels table */}
           <Card
             title="Panels Added"
             hover
@@ -543,94 +530,59 @@ export function StepPanels({
               </p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
+                <table className="w-full text-sm border-collapse">
+                  <thead className="bg-gray-50 border-b">
                     <tr>
                       <th className="px-3 py-2 text-left">#</th>
                       <th className="px-3 py-2 text-left">Label</th>
                       <th className="px-3 py-2 text-left">Size (mm)</th>
                       <th className="px-3 py-2 text-left">Qty</th>
                       <th className="px-3 py-2 text-left">Board</th>
+                      <th className="px-3 py-2 text-left">Edges</th>
                       <th className="px-3 py-2"></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {panels.map((panel, idx) => (
-                      <tr key={panel.id} className="border-t border-gray-100">
-                        <td className="px-3 py-3">{idx + 1}</td>
-                        <td className="px-3 py-3 font-medium">
-                          {panel.label}
-                        </td>
-                        <td className="px-3 py-3">
-                          {panel.width} × {panel.length}
-                        </td>
-                        <td className="px-3 py-3">{panel.quantity}</td>
-                        <td className="px-3 py-3 text-xs">
-                          {panel.board.company} {panel.board.thickness_mm}mm
-                        </td>
-                        <td className="px-3 py-3">
-                          <button
-                            onClick={() => deletePanel(panel.id)}
-                            className="text-red-500 hover:text-red-700"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {panels.map((panel, idx) => {
+                      const appliedEdges = Object.entries(panel.edges || {})
+                        .filter(([, v]) => v)
+                        .map(([k]) => k[0].toUpperCase())
+                        .join('');
+                      return (
+                        <tr key={panel.id} className="border-b border-gray-100">
+                          <td className="px-3 py-3">{idx + 1}</td>
+                          <td className="px-3 py-3 font-medium">
+                            {panel.label}
+                          </td>
+                          <td className="px-3 py-3">
+                            {panel.width} × {panel.length}
+                          </td>
+                          <td className="px-3 py-3">{panel.quantity}</td>
+                          <td className="px-3 py-3 text-xs">
+                            {panel.board.company}{' '}
+                            {panel.board.thickness_mm}mm
+                          </td>
+                          <td className="px-3 py-3 text-xs">
+                            {appliedEdges || 'None'}
+                          </td>
+                          <td className="px-3 py-3">
+                            <button
+                              onClick={() => deletePanel(panel.id)}
+                              className="text-red-500 hover:text-red-700"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             )}
           </Card>
 
-          <Card title="Stock Sheets" hover>
-            <div className="space-y-3">
-              {stockSheets.map((sheet) => (
-                <div key={sheet.id} className="flex gap-3 items-center">
-                  <Input
-                    type="number"
-                    value={sheet.length}
-                    onChange={(e) =>
-                      updateStockSheet(sheet.id, 'length', Number(e.target.value))
-                    }
-                    placeholder="Length"
-                  />
-                  <Input
-                    type="number"
-                    value={sheet.width}
-                    onChange={(e) =>
-                      updateStockSheet(sheet.id, 'width', Number(e.target.value))
-                    }
-                    placeholder="Width"
-                  />
-                  <Input
-                    type="number"
-                    value={sheet.quantity}
-                    onChange={(e) =>
-                      updateStockSheet(
-                        sheet.id,
-                        'quantity',
-                        Number(e.target.value)
-                      )
-                    }
-                    placeholder="Qty"
-                  />
-                  <button
-                    onClick={() => deleteStockSheet(sheet.id)}
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-              <Button variant="outline" onClick={addStockSheet} fullWidth>
-                <Plus className="w-4 h-4" />
-                Add Stock Sheet
-              </Button>
-            </div>
-          </Card>
-
+          {/* Options */}
           <Card title="Options" hover>
             <div className="space-y-2">
               <div className="mb-4">
@@ -684,10 +636,11 @@ export function StepPanels({
             </div>
           </Card>
 
+          {/* Supply & Customer */}
           <Card title="Supply & Customer" hover>
             <div className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-3 uppercase">
+                <label className="block text_sm font-medium text-gray-700 mb-3 uppercase">
                   Supply Mode
                 </label>
                 <div className="grid grid-cols-2 gap-3">
