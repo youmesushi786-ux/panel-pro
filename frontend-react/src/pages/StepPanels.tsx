@@ -47,8 +47,10 @@ export function StepPanels({
   const [catalog, setCatalog] = useState<BoardCatalog | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
 
-  const [currentBoard, setCurrentBoard] = useState<Partial<BoardSelection>>({});
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [selectedPanelId, setSelectedPanelId] = useState<string | null>(
+    panels[0]?.id ?? null,
+  );
+  const [boardError, setBoardError] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -66,20 +68,22 @@ export function StepPanels({
       });
   }, []);
 
-  const validateBoardSelection = () => {
-    const newErrors: Record<string, string> = {};
-    if (!currentBoard.core_type) newErrors.core = 'Core type is required';
-    if (!currentBoard.thickness_mm)
-      newErrors.thickness = 'Thickness is required';
-    if (!currentBoard.company) newErrors.company = 'Company is required';
-    if (!currentBoard.color_code) newErrors.color = 'Color is required';
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
+  // Keep selectedPanelId valid if panels change
+  useEffect(() => {
+    if (!selectedPanelId && panels[0]) {
+      setSelectedPanelId(panels[0].id);
+    } else if (
+      selectedPanelId &&
+      !panels.some((p) => p.id === selectedPanelId)
+    ) {
+      setSelectedPanelId(panels[0]?.id ?? null);
+    }
+  }, [panels, selectedPanelId]);
+
+  const selectedPanel = panels.find((p) => p.id === selectedPanelId) ?? null;
 
   const addPanelRow = () => {
-    if (!validateBoardSelection()) return;
-
+    // Create a completely blank panel row; user will fill label/size/qty and then choose board.
     const newPanel: Panel = {
       id: Date.now().toString(),
       label: '',
@@ -88,7 +92,15 @@ export function StepPanels({
       quantity: 1,
       alignment: 'none',
       notes: '',
-      board: currentBoard as BoardSelection,
+      board: {
+        // we mark board fields empty; validation will require user to fill them
+        core_type: undefined as any,
+        thickness_mm: undefined as any,
+        company: '',
+        color_code: '',
+        color_name: '',
+        color_hex: '',
+      } as BoardSelection,
       edges: {
         top: false,
         right: false,
@@ -98,6 +110,8 @@ export function StepPanels({
     };
 
     onPanelsChange([...panels, newPanel]);
+    setSelectedPanelId(newPanel.id);
+    setBoardError(null);
   };
 
   const updatePanelField = (
@@ -138,6 +152,27 @@ export function StepPanels({
     );
   };
 
+  const updateSelectedPanelBoard = (
+    field: keyof BoardSelection,
+    value: any,
+  ) => {
+    if (!selectedPanel) return;
+    onPanelsChange(
+      panels.map((p) =>
+        p.id === selectedPanel.id
+          ? {
+              ...p,
+              board: {
+                ...p.board,
+                [field]: value,
+              },
+            }
+          : p,
+      ),
+    );
+    setBoardError(null);
+  };
+
   const deletePanel = (id: string) => {
     onPanelsChange(panels.filter((p) => p.id !== id));
   };
@@ -160,22 +195,44 @@ export function StepPanels({
 
   const coreTypes = Object.keys(coreMap);
 
-  const availableThicknesses =
-    currentBoard.core_type && coreMap[currentBoard.core_type]
-      ? coreMap[currentBoard.core_type].thicknesses ?? []
+  // Helpers for selected panel's board
+  const selectedBoard = selectedPanel?.board ?? ({} as Partial<BoardSelection>);
+  const selectedCore = selectedBoard.core_type as string | undefined;
+
+  const availableThicknessesForSelected =
+    selectedCore && coreMap[selectedCore]
+      ? coreMap[selectedCore].thicknesses ?? []
       : [];
 
-  const availableCompanies =
-    currentBoard.core_type &&
-    currentBoard.thickness_mm &&
-    coreMap[currentBoard.core_type]
-      ? coreMap[currentBoard.core_type].companies ?? []
+  const availableCompaniesForSelected =
+    selectedCore && coreMap[selectedCore]
+      ? coreMap[selectedCore].companies ?? []
       : [];
 
-  const availableColors =
-    currentBoard.company && colorsByCompany[currentBoard.company]
-      ? colorsByCompany[currentBoard.company]
+  const availableColorsForSelected =
+    selectedBoard.company && colorsByCompany[selectedBoard.company]
+      ? colorsByCompany[selectedBoard.company]
       : [];
+
+  const handleNext = () => {
+    // Ensure each panel has a board selection
+    const incomplete = panels.find(
+      (p) =>
+        !p.board?.core_type ||
+        !p.board?.thickness_mm ||
+        !p.board?.company ||
+        !p.board?.color_code,
+    );
+    if (incomplete) {
+      setBoardError(
+        'Please select a board (core, thickness, company, color) for every panel row.',
+      );
+      setSelectedPanelId(incomplete.id);
+      return;
+    }
+
+    onNext();
+  };
 
   return (
     <div className="p-6 max-w-[1800px] mx-auto">
@@ -184,30 +241,251 @@ export function StepPanels({
           Panels & Board Configuration
         </h2>
         <p className="text-gray-600">
-          Define your panels, select board materials, and configure cutting
-          options
+          Enter panel rows in the table, then choose a board for each panel
+          using the section below.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        {/* LEFT COLUMN: Board selection + summary + actions */}
-        <div className="space-y-6">
-          {/* Board selection */}
-          <Card
-            title="Board Selection"
-            subtitle="Choose core, thickness, company, and color (applies to new rows)"
-            hover
-          >
-            {(errors.core ||
-              errors.thickness ||
-              errors.company ||
-              errors.color) && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-600">
-                Please complete all board selections for new rows.
+      <div className="space-y-6">
+        {/* PANELS TABLE (big, open, inline editable) */}
+        <Card
+          title="Panels"
+          subtitle="Edit your panels directly in this table"
+          hover
+          actions={
+            <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 justify-end">
+              <div>
+                <strong>{panels.length}</strong> unique panels
               </div>
-            )}
+              <div>
+                <strong>{totalPieces}</strong> total pieces
+              </div>
+              <div>
+                <strong>{totalArea.toFixed(2)}</strong> m² total area
+              </div>
+              <Button size="sm" onClick={addPanelRow}>
+                <Plus className="w-4 h-4 mr-1" />
+                Add Row
+              </Button>
+            </div>
+          }
+        >
+          {panels.length === 0 ? (
+            <p className="text-gray-500 text-center py-10 text-base">
+              No panels yet. Click <strong>Add Row</strong> to start, then fill
+              in label, size, and quantity.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm md:text-base border-collapse">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="px-4 py-3 text-left">#</th>
+                    <th className="px-4 py-3 text-left">Label</th>
+                    <th className="px-4 py-3 text-left">Length (mm)</th>
+                    <th className="px-4 py-3 text-left">Width (mm)</th>
+                    <th className="px-4 py-3 text-left">Qty</th>
+                    <th className="px-4 py-3 text-left">Board</th>
+                    <th className="px-4 py-3 text-left">Edges</th>
+                    <th className="px-4 py-3"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {panels.map((panel, idx) => {
+                    const edges = panel.edges || {
+                      top: false,
+                      right: false,
+                      bottom: false,
+                      left: false,
+                    };
+                    const isSelected = panel.id === selectedPanelId;
 
+                    const boardSummary =
+                      panel.board &&
+                      (panel.board.company ||
+                        panel.board.thickness_mm ||
+                        panel.board.color_name)
+                        ? `${panel.board.company ?? ''} ${
+                            panel.board.thickness_mm ?? ''
+                          }mm • ${panel.board.color_name ?? ''}`
+                        : 'No board selected';
+
+                    return (
+                      <tr
+                        key={panel.id}
+                        className={`border-b border-gray-100 hover:bg-gray-50/70 transition-colors cursor-pointer ${
+                          isSelected ? 'bg-orange-50/60' : ''
+                        }`}
+                        onClick={() => setSelectedPanelId(panel.id)}
+                      >
+                        <td className="px-4 py-3 align-middle">{idx + 1}</td>
+
+                        {/* Label */}
+                        <td className="px-4 py-3 align-middle">
+                          <Input
+                            value={panel.label}
+                            onChange={(e) =>
+                              updatePanelField(
+                                panel.id,
+                                'label',
+                                e.target.value,
+                              )
+                            }
+                            placeholder="Label"
+                            className="h-10 text-sm md:text-base"
+                          />
+                        </td>
+
+                        {/* Length */}
+                        <td className="px-4 py-3 align-middle">
+                          <Input
+                            type="number"
+                            value={panel.length || ''}
+                            onChange={(e) =>
+                              updatePanelField(
+                                panel.id,
+                                'length',
+                                e.target.value,
+                              )
+                            }
+                            placeholder="Length"
+                            className="h-10 text-sm md:text-base"
+                          />
+                        </td>
+
+                        {/* Width */}
+                        <td className="px-4 py-3 align-middle">
+                          <Input
+                            type="number"
+                            value={panel.width || ''}
+                            onChange={(e) =>
+                              updatePanelField(
+                                panel.id,
+                                'width',
+                                e.target.value,
+                              )
+                            }
+                            placeholder="Width"
+                            className="h-10 text-sm md:text-base"
+                          />
+                        </td>
+
+                        {/* Quantity */}
+                        <td className="px-4 py-3 align-middle">
+                          <Input
+                            type="number"
+                            value={panel.quantity || ''}
+                            onChange={(e) =>
+                              updatePanelField(
+                                panel.id,
+                                'quantity',
+                                e.target.value,
+                              )
+                            }
+                            placeholder="Qty"
+                            className="h-10 text-sm md:text-base w-20"
+                          />
+                        </td>
+
+                        {/* Board summary */}
+                        <td className="px-4 py-3 align-middle text-xs md:text-sm">
+                          {boardSummary === 'No board selected' ? (
+                            <span className="text-red-500">{boardSummary}</span>
+                          ) : (
+                            <span className="text-gray-800">
+                              {boardSummary}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Edges (T/R/B/L toggles) */}
+                        <td className="px-4 py-3 align-middle">
+                          <div className="flex gap-1">
+                            {(
+                              [
+                                ['T', 'top'],
+                                ['R', 'right'],
+                                ['B', 'bottom'],
+                                ['L', 'left'],
+                              ] as const
+                            ).map(([label, key]) => (
+                              <button
+                                key={key}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  togglePanelEdge(panel.id, key);
+                                }}
+                                className={`w-7 h-7 flex items-center justify-center rounded text-[11px] border ${
+                                  edges[key]
+                                    ? 'bg-orange-500 text-white border-orange-500'
+                                    : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-100'
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </td>
+
+                        {/* Delete */}
+                        <td className="px-4 py-3 align-middle text-right">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deletePanel(panel.id);
+                            }}
+                            className="text-red-500 hover:text-red-700"
+                            type="button"
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+
+        {/* BOARD SELECTION FOR SELECTED PANEL */}
+        <Card
+          title="Board Selection for Selected Panel"
+          subtitle="Choose core, thickness, company, and color for the highlighted row above"
+          hover
+        >
+          {boardError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-600">
+              {boardError}
+            </div>
+          )}
+
+          {!selectedPanel ? (
+            <p className="text-gray-500 text-sm">
+              No panel selected. Add a row above and click it to edit its board.
+            </p>
+          ) : (
             <div className="space-y-6">
+              {catalogError && (
+                <p className="text-xs text-red-500">
+                  Failed to load board catalog: {catalogError}
+                </p>
+              )}
+
+              {/* Selected panel summary */}
+              <div className="bg-gray-50 p-3 rounded-lg text-sm">
+                <p className="font-medium text-gray-900">
+                  Panel: {selectedPanel.label || '(no label)'}
+                </p>
+                <p className="text-gray-700">
+                  Size: {selectedPanel.length} × {selectedPanel.width} mm • Qty:{' '}
+                  {selectedPanel.quantity}
+                </p>
+              </div>
+
+              {/* Core type */}
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-2 uppercase">
                   Core Type
@@ -217,17 +495,12 @@ export function StepPanels({
                     <Chip
                       key={core}
                       label={core.replace('_', ' ').toUpperCase()}
-                      selected={currentBoard.core_type === core}
-                      onClick={() => setCurrentBoard({ core_type: core })}
+                      selected={selectedBoard.core_type === core}
+                      onClick={() =>
+                        updateSelectedPanelBoard('core_type', core)
+                      }
                     />
                   ))}
-
-                  {catalogError && (
-                    <p className="text-xs text-red-500">
-                      Failed to load board catalog: {catalogError}
-                    </p>
-                  )}
-
                   {!catalogError && coreTypes.length === 0 && (
                     <p className="text-xs text-gray-400">
                       No board catalog data available.
@@ -236,22 +509,20 @@ export function StepPanels({
                 </div>
               </div>
 
-              {availableThicknesses.length > 0 && (
+              {/* Thickness */}
+              {availableThicknessesForSelected.length > 0 && (
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-2 uppercase">
                     Thickness (mm)
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    {availableThicknesses.map((thickness) => (
+                    {availableThicknessesForSelected.map((thickness) => (
                       <Chip
                         key={thickness}
                         label={`${thickness}mm`}
-                        selected={currentBoard.thickness_mm === thickness}
+                        selected={selectedBoard.thickness_mm === thickness}
                         onClick={() =>
-                          setCurrentBoard({
-                            ...currentBoard,
-                            thickness_mm: thickness,
-                          })
+                          updateSelectedPanelBoard('thickness_mm', thickness)
                         }
                       />
                     ))}
@@ -259,19 +530,20 @@ export function StepPanels({
                 </div>
               )}
 
-              {availableCompanies.length > 0 && (
+              {/* Company */}
+              {availableCompaniesForSelected.length > 0 && (
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-2 uppercase">
                     Company
                   </label>
                   <div className="flex flex-wrap gap-2">
-                    {availableCompanies.map((company) => (
+                    {availableCompaniesForSelected.map((company) => (
                       <Chip
                         key={company}
                         label={company}
-                        selected={currentBoard.company === company}
+                        selected={selectedBoard.company === company}
                         onClick={() =>
-                          setCurrentBoard({ ...currentBoard, company })
+                          updateSelectedPanelBoard('company', company)
                         }
                       />
                     ))}
@@ -279,80 +551,36 @@ export function StepPanels({
                 </div>
               )}
 
-              {availableColors.length > 0 && (
+              {/* Color */}
+              {availableColorsForSelected.length > 0 && (
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-2 uppercase">
                     Color
                   </label>
                   <div className="flex flex-wrap gap-3">
-                    {availableColors.map((color) => (
+                    {availableColorsForSelected.map((color) => (
                       <Chip
                         key={color.code}
                         label={`${color.code} - ${color.name}`}
                         variant="color"
                         color={color.hex}
-                        selected={currentBoard.color_code === color.code}
-                        onClick={() =>
-                          setCurrentBoard({
-                            ...currentBoard,
-                            color_code: color.code,
-                            color_name: color.name,
-                            color_hex: color.hex,
-                          })
-                        }
+                        selected={selectedBoard.color_code === color.code}
+                        onClick={() => {
+                          updateSelectedPanelBoard('color_code', color.code);
+                          updateSelectedPanelBoard('color_name', color.name);
+                          updateSelectedPanelBoard('color_hex', color.hex);
+                        }}
                       />
                     ))}
                   </div>
                 </div>
               )}
-
-              {currentBoard.core_type && (
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <h4 className="text-xs font-medium text-gray-500 mb-2 uppercase">
-                    Current Board for New Rows
-                  </h4>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <span className="text-gray-600">Core:</span>{' '}
-                      <strong>
-                        {currentBoard.core_type?.replace('_', ' ') || '-'}
-                      </strong>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Thickness:</span>{' '}
-                      <strong>{currentBoard.thickness_mm || '-'}mm</strong>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Company:</span>{' '}
-                      <strong>{currentBoard.company || '-'}</strong>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Color:</span>{' '}
-                      <strong>{currentBoard.color_name || '-'}</strong>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
-          </Card>
+          )}
+        </Card>
 
-          {/* Add row button */}
-          <Card hover>
-            <div className="flex items-center justify-between">
-              <div className="text-sm text-gray-600">
-                <p className="font-medium text-gray-900">Panel Rows</p>
-                <p>
-                  Define panels directly in the table on the right. Each new row
-                  uses the current board selection.
-                </p>
-              </div>
-              <Button onClick={addPanelRow}>
-                <Plus className="w-4 h-4 mr-1" />
-                Add Row
-              </Button>
-            </div>
-          </Card>
-
+        {/* OPTIONS + SUPPLY & CUSTOMER */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           {/* Options */}
           <Card title="Options" hover>
             <div className="space-y-2">
@@ -530,197 +758,10 @@ export function StepPanels({
             </div>
           </Card>
         </div>
-
-        {/* RIGHT COLUMN: Advanced panels table */}
-        <div className="space-y-6">
-          <Card
-            title="Panels"
-            subtitle="Edit your panels directly in this table"
-            hover
-            actions={
-              <div className="text-sm text-gray-600 text-right">
-                <div>
-                  <strong>{panels.length}</strong> unique panels
-                </div>
-                <div>
-                  <strong>{totalPieces}</strong> total pieces
-                </div>
-                <div>
-                  <strong>{totalArea.toFixed(2)}</strong> m² total area
-                </div>
-              </div>
-            }
-          >
-            {panels.length === 0 ? (
-              <p className="text-gray-500 text-center py-8">
-                No panels yet. Use <strong>Add Row</strong> after selecting a
-                board.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs sm:text-sm border-collapse">
-                  <thead className="bg-gray-50 border-b">
-                    <tr>
-                      <th className="px-3 py-2 text-left">#</th>
-                      <th className="px-3 py-2 text-left">Label</th>
-                      <th className="px-3 py-2 text-left">Length (mm)</th>
-                      <th className="px-3 py-2 text-left">Width (mm)</th>
-                      <th className="px-3 py-2 text-left">Qty</th>
-                      <th className="px-3 py-2 text-left">Material</th>
-                      <th className="px-3 py-2 text-left">Edges</th>
-                      <th className="px-3 py-2"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {panels.map((panel, idx) => {
-                      const edges = panel.edges || {
-                        top: false,
-                        right: false,
-                        bottom: false,
-                        left: false,
-                      };
-
-                      return (
-                        <tr
-                          key={panel.id}
-                          className="border-b border-gray-100 hover:bg-gray-50/70 transition-colors"
-                        >
-                          <td className="px-3 py-2 align-middle">
-                            {idx + 1}
-                          </td>
-
-                          {/* Label */}
-                          <td className="px-3 py-2 align-middle">
-                            <Input
-                              value={panel.label}
-                              onChange={(e) =>
-                                updatePanelField(
-                                  panel.id,
-                                  'label',
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Label"
-                              className="h-8 text-xs sm:text-sm"
-                            />
-                          </td>
-
-                          {/* Length */}
-                          <td className="px-3 py-2 align-middle">
-                            <Input
-                              type="number"
-                              value={panel.length || ''}
-                              onChange={(e) =>
-                                updatePanelField(
-                                  panel.id,
-                                  'length',
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Length"
-                              className="h-8 text-xs sm:text-sm"
-                            />
-                          </td>
-
-                          {/* Width */}
-                          <td className="px-3 py-2 align-middle">
-                            <Input
-                              type="number"
-                              value={panel.width || ''}
-                              onChange={(e) =>
-                                updatePanelField(
-                                  panel.id,
-                                  'width',
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Width"
-                              className="h-8 text-xs sm:text-sm"
-                            />
-                          </td>
-
-                          {/* Quantity */}
-                          <td className="px-3 py-2 align-middle">
-                            <Input
-                              type="number"
-                              value={panel.quantity || ''}
-                              onChange={(e) =>
-                                updatePanelField(
-                                  panel.id,
-                                  'quantity',
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Qty"
-                              className="h-8 text-xs sm:text-sm"
-                            />
-                          </td>
-
-                          {/* Material summary */}
-                          <td className="px-3 py-2 align-middle text-[10px] sm:text-xs">
-                            <div className="whitespace-nowrap">
-                              <span className="font-medium">
-                                {panel.board.company}
-                              </span>{' '}
-                              {panel.board.thickness_mm}mm
-                            </div>
-                            <div className="text-gray-500 truncate max-w-[140px]">
-                              {panel.board.color_name}
-                            </div>
-                          </td>
-
-                          {/* Edges (T/R/B/L toggles) */}
-                          <td className="px-3 py-2 align-middle">
-                            <div className="flex gap-1">
-                              {(
-                                [
-                                  ['T', 'top'],
-                                  ['R', 'right'],
-                                  ['B', 'bottom'],
-                                  ['L', 'left'],
-                                ] as const
-                              ).map(([label, key]) => (
-                                <button
-                                  key={key}
-                                  type="button"
-                                  onClick={() =>
-                                    togglePanelEdge(panel.id, key)
-                                  }
-                                  className={`w-6 h-6 flex items-center justify-center rounded text-[10px] border ${
-                                    edges[key]
-                                      ? 'bg-orange-500 text-white border-orange-500'
-                                      : 'bg-white text-gray-500 border-gray-300 hover:bg-gray-100'
-                                  }`}
-                                >
-                                  {label}
-                                </button>
-                              ))}
-                            </div>
-                          </td>
-
-                          {/* Delete */}
-                          <td className="px-3 py-2 align-middle text-right">
-                            <button
-                              onClick={() => deletePanel(panel.id)}
-                              className="text-red-500 hover:text-red-700"
-                              type="button"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-        </div>
       </div>
 
       <div className="mt-8 flex justify-end">
-        <Button onClick={onNext} size="lg">
+        <Button onClick={handleNext} size="lg">
           Optimize & View Results
         </Button>
       </div>
