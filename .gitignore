@@ -1,2 +1,38 @@
-node_modules
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment files
 .env
+.env.*
+
+# Editors / IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build / logs
+dist/
+build/
+*.log
+
+# SQLite / local db
+*.db
+*.sqlite3
+
+# Node (if frontend exists in same repo)
+node_modules/
+coverage/
