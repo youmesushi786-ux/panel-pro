@@ -1,15 +1,10 @@
-"""Pydantic schemas for panel cutting optimizer."""
-
 from __future__ import annotations
 
-from typing import List, Optional, Dict, Any
 from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
-from enum import Enum
-
-
-# -------- Enums --------
 
 
 class GrainAlignment(str, Enum):
@@ -33,19 +28,13 @@ class ThicknessMM(int, Enum):
     t18 = 18
 
 
-# -------- Board Selection --------
-
-
 class BoardSelection(BaseModel):
     core_type: CoreType
     thickness_mm: ThicknessMM
-    company: str
-    color_code: str
-    color_name: str
-    color_hex: Optional[str] = None
-
-
-# -------- Request Models --------
+    company: str = Field(min_length=1, max_length=100)
+    color_code: str = Field(min_length=1, max_length=100)
+    color_name: str = Field(min_length=1, max_length=100)
+    color_hex: Optional[str] = Field(default=None, max_length=20)
 
 
 class EdgingSpec(BaseModel):
@@ -63,7 +52,7 @@ class PanelDetail(BaseModel):
     alignment: GrainAlignment = GrainAlignment.none
     label: Optional[str] = None
     notes: Optional[str] = None
-    board: Optional[BoardSelection] = None  # per-panel board override
+    board: Optional[BoardSelection] = None
 
     @property
     def area_mm2(self) -> float:
@@ -75,7 +64,7 @@ class PanelDetail(BaseModel):
 
     @property
     def edge_length_mm(self) -> float:
-        total = 0
+        total = 0.0
         if self.edging.left:
             total += self.length
         if self.edging.right:
@@ -90,6 +79,10 @@ class PanelDetail(BaseModel):
     def total_edge_length_mm(self) -> float:
         return self.edge_length_mm * self.quantity
 
+    @property
+    def grain_applicable(self) -> bool:
+        return self.alignment != GrainAlignment.none
+
     def get_effective_board(self, default_board: BoardSelection) -> BoardSelection:
         return self.board or default_board
 
@@ -98,29 +91,27 @@ class SupplyMode(BaseModel):
     client_supply: bool = False
     factory_supply: bool = True
     client_board_qty: Optional[int] = Field(default=None, ge=1, le=100)
-    client_edging_meters: Optional[float] = Field(
-        default=None,
-        ge=0,
-        le=10000,
-        description="Meters of edging supplied by client (for labour charging).",
-    )
+    client_edging_meters: Optional[float] = Field(default=None, ge=0, le=10000)
 
     @model_validator(mode="after")
-    def check_mode(cls, v: "SupplyMode") -> "SupplyMode":
-        if v.client_supply and v.factory_supply:
+    def check_mode(self) -> "SupplyMode":
+        if self.client_supply and self.factory_supply:
             raise ValueError("Only one of client_supply or factory_supply can be true")
-        if not v.client_supply and not v.factory_supply:
+        if not self.client_supply and not self.factory_supply:
             raise ValueError("Either client_supply or factory_supply must be true")
-
-        if v.client_supply and (v.client_board_qty is None or v.client_board_qty <= 0):
+        if self.client_supply and (self.client_board_qty is None or self.client_board_qty <= 0):
             raise ValueError("client_board_qty is required when client_supply is true")
-        return v
+        return self
 
 
 class StockSheet(BaseModel):
     length: float = Field(gt=0, le=5000)
     width: float = Field(gt=0, le=5000)
     qty: int = Field(gt=0, le=1000)
+
+    @property
+    def area_mm2(self) -> float:
+        return self.width * self.length
 
 
 class Options(BaseModel):
@@ -130,24 +121,61 @@ class Options(BaseModel):
     consider_material: bool = False
     edge_banding: bool = True
     consider_grain: bool = False
+    allow_rotation: bool = True
+    prefer_fewer_boards: bool = True
+    prefer_less_waste: bool = True
+    generate_cuts: bool = False
+    reuse_offcuts: bool = False
+    strict_validation: bool = True
+    optimization_level: int = Field(default=2, ge=1, le=5)
+    strict_production_mode: bool = True
 
 
 class CuttingRequest(BaseModel):
-    panels: List[PanelDetail]
+    panels: List[PanelDetail] = Field(min_length=1)
     board: BoardSelection
     supply: SupplyMode
-
     stock_sheets: Optional[List[StockSheet]] = None
     options: Optional[Options] = None
-
+    board_width_mm: Optional[float] = Field(default=None, gt=0, le=5000)
+    board_length_mm: Optional[float] = Field(default=None, gt=0, le=5000)
     project_name: Optional[str] = None
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None
     customer_phone: Optional[str] = None
     notes: Optional[str] = None
 
+    @property
+    def kerf_mm(self) -> float:
+        return self.options.kerf if self.options else 3.0
 
-# -------- Layout & Stats Models --------
+    @property
+    def consider_grain(self) -> bool:
+        return self.options.consider_grain if self.options else False
+
+    @property
+    def allow_rotation(self) -> bool:
+        return self.options.allow_rotation if self.options else True
+
+    @property
+    def strict_production_mode(self) -> bool:
+        return self.options.strict_production_mode if self.options else True
+
+    @property
+    def effective_board_width_mm(self) -> Optional[float]:
+        if self.board_width_mm is not None:
+            return self.board_width_mm
+        if self.stock_sheets and len(self.stock_sheets) == 1:
+            return self.stock_sheets[0].width
+        return None
+
+    @property
+    def effective_board_length_mm(self) -> Optional[float]:
+        if self.board_length_mm is not None:
+            return self.board_length_mm
+        if self.stock_sheets and len(self.stock_sheets) == 1:
+            return self.stock_sheets[0].length
+        return None
 
 
 class PlacedPanel(BaseModel):
@@ -157,11 +185,14 @@ class PlacedPanel(BaseModel):
     width: float
     length: float
     label: Optional[str] = None
+    rotated: bool = False
+    grain_aligned: Optional[GrainAlignment] = None
+    board_number: Optional[int] = None
 
 
 class CutSegment(BaseModel):
     id: int
-    orientation: str  # "H" or "V"
+    orientation: str
     x1: float
     y1: float
     x2: float
@@ -192,9 +223,13 @@ class OptimizationSummary(BaseModel):
     total_waste_percent: float
     board_width: float
     board_length: float
-
-
-# -------- Edging Models --------
+    total_used_area_mm2: float = 0.0
+    overall_efficiency_percent: float = 0.0
+    kerf_mm: float = 0.0
+    grain_considered: bool = False
+    material_groups: int = 1
+    impossible_panels: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
 
 
 class EdgingDetail(BaseModel):
@@ -208,9 +243,6 @@ class EdgingDetail(BaseModel):
 class EdgingSummary(BaseModel):
     total_meters: float
     details: List[EdgingDetail]
-
-
-# -------- Pricing & BOQ Models --------
 
 
 class PricingLine(BaseModel):
@@ -242,7 +274,7 @@ class PricingSummary(BaseModel):
     total: float
     currency: str
     supplied_by: str
-    panel_boq: List[PanelBoqLine] = []
+    panel_boq: List[PanelBoqLine] = Field(default_factory=list)
 
 
 class BOQItem(BaseModel):
@@ -252,7 +284,6 @@ class BOQItem(BaseModel):
     quantity: int
     unit: str
     edges: str
-
     core_type: Optional[str] = None
     thickness_mm: Optional[int] = None
     company: Optional[str] = None
@@ -270,9 +301,6 @@ class BOQSummary(BaseModel):
     pricing: PricingSummary
 
 
-# -------- Top-level Response --------
-
-
 class CuttingResponse(BaseModel):
     request_summary: Dict[str, Any]
     optimization: OptimizationSummary
@@ -286,4 +314,4 @@ class CuttingResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "healthy"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    version: str = "1.0.0"
+    version: str = "2.1.2-render-check"
