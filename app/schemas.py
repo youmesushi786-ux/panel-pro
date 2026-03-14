@@ -314,4 +314,4 @@ class CuttingResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "healthy"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    version: str = "2.1.0"
+    version: str = "2.1.2-render-check"
