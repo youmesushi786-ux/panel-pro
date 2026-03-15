@@ -82,15 +82,25 @@ PENDING_CHECKOUT: dict[str, str] = {}
 def require_admin_api_key(x_api_key: Optional[str]) -> None:
     if not ADMIN_API_KEY:
         raise HTTPException(status_code=500, detail="ADMIN_API_KEY is not configured")
-
     if x_api_key != ADMIN_API_KEY:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    logger.error("Validation error on %s: %s", request.url.path, exc.errors())
+    logger.error("Validation error on %s", request.url.path)
+    logger.error("Validation details: %s", exc.errors())
+    logger.error("Request body: %s", exc.body)
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
+@app.get("/")
+async def root():
+    return {
+        "message": "PanelPro API is running",
+        "environment": ENVIRONMENT,
+        "status": "ok",
+    }
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -107,12 +117,7 @@ async def boards_catalog() -> Dict[str, Any]:
     }
 
 
-def build_boq(
-    request: CuttingRequest,
-    optimization,
-    edging,
-    pricing,
-) -> BOQSummary:
+def build_boq(request: CuttingRequest, optimization, edging, pricing) -> BOQSummary:
     items: list[BOQItem] = []
 
     for idx, p in enumerate(request.panels, start=1):
@@ -193,10 +198,7 @@ def build_boq(
     )
 
 
-def build_stickers(
-    request: CuttingRequest,
-    layouts,
-) -> StickerSheet:
+def build_stickers(request: CuttingRequest, layouts) -> StickerSheet:
     labels: list[StickerLabel] = []
     serial_counter = 1
     panel_instance_counter: dict[int, int] = {}
@@ -246,6 +248,13 @@ def build_stickers(
 
 @app.post("/api/optimize", response_model=CuttingResponse)
 async def api_optimize(req: CuttingRequest) -> CuttingResponse:
+    logger.info(
+        "Received /api/optimize request: project=%s customer=%s panels=%s",
+        req.project_name,
+        req.customer_name,
+        len(req.panels),
+    )
+
     boards, optimization, edging_summary = run_optimization(req)
     pricing = calculate_pricing(req, optimization, edging_summary.total_meters)
     boq = build_boq(req, optimization, edging_summary, pricing)
@@ -261,7 +270,7 @@ async def api_optimize(req: CuttingRequest) -> CuttingResponse:
         },
         optimization=optimization,
         layouts=boards,
-        edging=edging_summary,
+        edging=edgeging_summary if False else edging_summary,
         stickers=stickers,
         boq=boq,
         report_id=report_id,
@@ -403,7 +412,6 @@ async def test_email(
         send_email(to_email=to, subject=subject, html_body=html)
         return {"status": "sent", "to": to}
     except Exception as exc:
-        logger.exception("Failed to send test email")
         return JSONResponse(status_code=500, content={"status": "error", "detail": str(exc)})
 
 
