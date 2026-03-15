@@ -79,10 +79,6 @@ class PanelDetail(BaseModel):
     def total_edge_length_mm(self) -> float:
         return self.edge_length_mm * self.quantity
 
-    @property
-    def grain_applicable(self) -> bool:
-        return self.alignment != GrainAlignment.none
-
     def get_effective_board(self, default_board: BoardSelection) -> BoardSelection:
         return self.board or default_board
 
@@ -108,10 +104,6 @@ class StockSheet(BaseModel):
     length: float = Field(gt=0, le=5000)
     width: float = Field(gt=0, le=5000)
     qty: int = Field(gt=0, le=1000)
-
-    @property
-    def area_mm2(self) -> float:
-        return self.width * self.length
 
 
 class Options(BaseModel):
@@ -152,10 +144,6 @@ class CuttingRequest(BaseModel):
     @property
     def consider_grain(self) -> bool:
         return self.options.consider_grain if self.options else False
-
-    @property
-    def allow_rotation(self) -> bool:
-        return self.options.allow_rotation if self.options else True
 
     @property
     def strict_production_mode(self) -> bool:
@@ -252,15 +240,12 @@ class StickerLabel(BaseModel):
     length_mm: float
     quantity_index: int
     board_number: Optional[int] = None
-
     core_type: Optional[str] = None
     thickness_mm: Optional[int] = None
     company: Optional[str] = None
     colour: Optional[str] = None
-
     edges: str
     grain_alignment: Optional[str] = None
-
     logo_url: Optional[str] = None
     company_name: Optional[str] = None
 
@@ -340,4 +325,4 @@ class CuttingResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "healthy"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    version: str = "2.2.0-stickers"
+    version: str = "2.3.0-sync"
