@@ -245,7 +245,7 @@ def _build_edging_summary(request: CuttingRequest) -> EdgingSummary:
             )
         )
 
-    return EdgingSummary(total_meters=total_edging_m, details=edging_details)
+    return EdgingSummary(total_meters=total_edging_m, details=edgeging_details)
 
 
 def _build_optimization_summary(
