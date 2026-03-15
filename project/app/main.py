@@ -117,7 +117,12 @@ async def boards_catalog() -> Dict[str, Any]:
     }
 
 
-def build_boq(request: CuttingRequest, optimization, edging, pricing) -> BOQSummary:
+def build_boq(
+    request: CuttingRequest,
+    optimization,
+    edging,
+    pricing,
+) -> BOQSummary:
     items: list[BOQItem] = []
 
     for idx, p in enumerate(request.panels, start=1):
@@ -198,7 +203,10 @@ def build_boq(request: CuttingRequest, optimization, edging, pricing) -> BOQSumm
     )
 
 
-def build_stickers(request: CuttingRequest, layouts) -> StickerSheet:
+def build_stickers(
+    request: CuttingRequest,
+    layouts,
+) -> StickerSheet:
     labels: list[StickerLabel] = []
     serial_counter = 1
     panel_instance_counter: dict[int, int] = {}
@@ -260,7 +268,10 @@ async def api_optimize(req: CuttingRequest) -> CuttingResponse:
     boq = build_boq(req, optimization, edging_summary, pricing)
     stickers = build_stickers(req, boards)
 
-    report_id = f"RPT-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{datetime.utcnow().microsecond:06d}"
+    report_id = (
+        f"RPT-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-"
+        f"{datetime.utcnow().microsecond:06d}"
+    )
 
     return CuttingResponse(
         request_summary={
@@ -270,7 +281,7 @@ async def api_optimize(req: CuttingRequest) -> CuttingResponse:
         },
         optimization=optimization,
         layouts=boards,
-       edging=edging_summary,
+        edging=edging_summary,
         stickers=stickers,
         boq=boq,
         report_id=report_id,
