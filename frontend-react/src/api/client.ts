@@ -7,18 +7,16 @@ import type {
   BackendCuttingRequest,
 } from '../types';
 
-// Backend base URL
 const envBase =
   (import.meta.env.VITE_API_BASE as string | undefined) ??
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
   undefined;
 
-// Normalize: remove trailing slash if present
 const API_BASE: string =
   (envBase ? envBase.replace(/\/$/, '') : undefined) ?? 'http://127.0.0.1:8000';
 
 /**
- * Convert frontend CuttingRequest shape -> backend CuttingRequest shape.
+ * Convert frontend request shape -> backend FastAPI request shape
  */
 function toBackendCuttingRequest(req: CuttingRequest): BackendCuttingRequest {
   const firstPanelBoard = req.panels[0]?.board;
@@ -35,50 +33,50 @@ function toBackendCuttingRequest(req: CuttingRequest): BackendCuttingRequest {
 
     board: firstPanelBoard,
 
-    panels: req.panels.map((p) => {
-      // Support both p.edging (old) and p.edges (UI layer) without TS complaints
-      const edges =
-        (p as any).edges ??
-        (p as any).edging ?? {
-          top: false,
-          right: false,
-          bottom: false,
-          left: false,
-        };
-
-      return {
-        label: p.label,
-        width: p.width,
-        length: p.length,
-        quantity: p.quantity,
-        alignment: p.alignment,
-        notes: p.notes,
-        edging: edges,
-        board: p.board,
-      };
-    }),
+    panels: req.panels.map((p) => ({
+      label: p.label,
+      width: p.width,
+      length: p.length,
+      quantity: p.quantity,
+      alignment: p.alignment,
+      notes: p.notes,
+      edging: p.edging ?? {
+        top: false,
+        right: false,
+        bottom: false,
+        left: false,
+      },
+      board: p.board,
+    })),
 
     stock_sheets: req.stock_sheets.map((s) => ({
       length: s.length,
       width: s.width,
-      qty: s.quantity, // backend expects `qty`
+      qty: s.quantity,
     })),
 
-    options: req.options,
+    options: {
+      kerf: req.options.kerf,
+      labels_on_panels: req.options.labels_on_panels,
+      use_single_sheet: req.options.use_single_sheet,
+      consider_material: req.options.consider_material,
+      edge_banding: req.options.edge_banding,
+      consider_grain: req.options.consider_grain,
+      allow_rotation: req.options.allow_rotation ?? true,
+      strict_validation: req.options.strict_validation ?? true,
+      optimization_level: req.options.optimization_level ?? 2,
+      strict_production_mode: req.options.strict_production_mode ?? true,
+    },
 
-    // Map frontend supply fields to backend names; cast as any to avoid TS type errors
     supply: {
       client_supply: req.supply.client_supply,
       factory_supply: req.supply.factory_supply,
-      client_board_qty: req.supply.client_boards || null,
-      client_edging_meters: req.supply.client_edging || null,
+      client_board_qty: req.supply.client_board_qty ?? null,
+      client_edging_meters: req.supply.client_edging_meters ?? null,
     } as any,
   };
 }
 
-/**
- * Generic helper to parse JSON and throw useful error messages.
- */
 async function handleResponse<T>(response: Response): Promise<T> {
   const text = await response.text().catch(() => '');
 
@@ -87,7 +85,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
     try {
       payload = JSON.parse(text);
     } catch {
-      payload = text; // not JSON
+      payload = text;
     }
   }
 
@@ -109,19 +107,16 @@ async function handleResponse<T>(response: Response): Promise<T> {
 }
 
 export const api = {
-  /** GET /health */
-  async checkHealth(): Promise<{ status: string }> {
+  async checkHealth(): Promise<{ status: string; version?: string }> {
     const response = await fetch(`${API_BASE}/health`);
     return handleResponse(response);
   },
 
-  /** GET /api/boards/catalog */
   async getBoardCatalog(): Promise<BoardCatalog> {
     const response = await fetch(`${API_BASE}/api/boards/catalog`);
     return handleResponse(response);
   },
 
-  /** POST /api/optimize */
   async optimize(request: CuttingRequest): Promise<CuttingResponse> {
     const backendReq = toBackendCuttingRequest(request);
 
@@ -130,10 +125,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(backendReq),
     });
+
     return handleResponse(response);
   },
 
-  /** POST /api/order/create */
   async createOrder(request: CuttingRequest): Promise<OrderResponse> {
     const backendReq = toBackendCuttingRequest(request);
 
@@ -142,10 +137,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(backendReq),
     });
+
     return handleResponse(response);
   },
 
-  /** POST /api/mpesa/initiate */
   async initiateMpesa(
     orderId: string,
     phoneNumber: string,
@@ -155,18 +150,18 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ order_id: orderId, phone_number: phoneNumber }),
     });
+
     return handleResponse(response);
   },
 
-  /** GET /api/payment/status?order_id=... */
   async getPaymentStatus(orderId: string): Promise<PaymentStatus> {
     const response = await fetch(
       `${API_BASE}/api/payment/status?order_id=${encodeURIComponent(orderId)}`,
     );
+
     return handleResponse(response);
   },
 
-  /** POST /api/notify/after-payment */
   async notifyAfterPayment(data: {
     order_id: string;
     project_name: string;
@@ -179,6 +174,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
+
     await handleResponse<unknown>(response).catch(() => undefined);
   },
 };
