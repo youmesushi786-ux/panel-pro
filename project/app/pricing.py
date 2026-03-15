@@ -26,13 +26,17 @@ from app.config import (
 logger = logging.getLogger("panelpro")
 
 
+def _money(value: float) -> float:
+    return round(float(value), 2)
+
+
 def get_board_price_per_sheet(board: BoardSelection) -> float:
     core = board.core_type.value
     th = int(board.thickness_mm.value)
     company = board.company
 
     try:
-        return float(BOARD_PRICE_TABLE[core][th][company])
+        return _money(BOARD_PRICE_TABLE[core][th][company])
     except KeyError:
         logger.warning(
             "No entry in BOARD_PRICE_TABLE for core=%s thickness=%s company=%s",
@@ -90,7 +94,7 @@ def calculate_pricing(
             board = request.board
             unit_price = get_board_price_per_sheet(board)
             boards_required = optimizer_boards_used
-            material_cost = boards_required * unit_price
+            material_cost = _money(boards_required * unit_price)
 
             lines.append(
                 PricingLine(
@@ -119,8 +123,8 @@ def calculate_pricing(
                         company=board.company,
                         colour=board.color_name,
                         quantity=p.quantity,
-                        area_m2=p.total_area_mm2 / 1_000_000.0,
-                        material_amount=p.total_area_mm2 * price_per_mm2,
+                        area_m2=_money(p.total_area_mm2 / 1_000_000.0),
+                        material_amount=_money(p.total_area_mm2 * price_per_mm2),
                     )
                 )
         else:
@@ -135,8 +139,8 @@ def calculate_pricing(
                 )
 
                 unit_price = get_board_price_per_sheet(board)
-                amount = sheets * unit_price
-                material_cost += amount
+                amount = _money(sheets * unit_price)
+                material_cost = _money(material_cost + amount)
 
                 lines.append(
                     PricingLine(
@@ -164,8 +168,8 @@ def calculate_pricing(
                             company=board.company,
                             colour=board.color_name,
                             quantity=p.quantity,
-                            area_m2=p.total_area_mm2 / 1_000_000.0,
-                            material_amount=p.total_area_mm2 * price_per_mm2_grp,
+                            area_m2=_money(p.total_area_mm2 / 1_000_000.0),
+                            material_amount=_money(p.total_area_mm2 * price_per_mm2_grp),
                         )
                     )
     else:
@@ -182,19 +186,19 @@ def calculate_pricing(
                         company=board.company,
                         colour=board.color_name,
                         quantity=p.quantity,
-                        area_m2=p.total_area_mm2 / 1_000_000.0,
+                        area_m2=_money(p.total_area_mm2 / 1_000_000.0),
                         material_amount=0.0,
                     )
                 )
 
-    cutting_cost = optimizer_boards_used * CUTTING_PRICE_PER_BOARD
+    cutting_cost = _money(optimizer_boards_used * CUTTING_PRICE_PER_BOARD)
     lines.append(
         PricingLine(
             item="Cutting",
             description="Board cutting service",
             quantity=optimizer_boards_used,
             unit="board",
-            unit_price=CUTTING_PRICE_PER_BOARD,
+            unit_price=_money(CUTTING_PRICE_PER_BOARD),
             amount=cutting_cost,
         )
     )
@@ -210,7 +214,10 @@ def calculate_pricing(
         effective_edging_m = total_edging_m
         edging_rate = EDGING_PRICE_PER_METER
 
-    edging_cost = effective_edging_m * edging_rate
+    effective_edging_m = _money(effective_edging_m)
+    edging_rate = _money(edging_rate)
+    edging_cost = _money(effective_edging_m * edging_rate)
+
     lines.append(
         PricingLine(
             item="Edging",
@@ -222,15 +229,15 @@ def calculate_pricing(
         )
     )
 
-    subtotal = material_cost + cutting_cost + edging_cost
-    tax_amount = subtotal * TAX_RATE
-    total = subtotal + tax_amount
+    subtotal = _money(material_cost + cutting_cost + edging_cost)
+    tax_amount = _money(subtotal * TAX_RATE)
+    total = _money(subtotal + tax_amount)
 
     return PricingSummary(
         lines=lines,
         subtotal=subtotal,
         tax_name="VAT",
-        tax_rate=TAX_RATE * 100.0,
+        tax_rate=_money(TAX_RATE * 100.0),
         tax_amount=tax_amount,
         total=total,
         currency=CURRENCY,
