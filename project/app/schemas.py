@@ -245,6 +245,31 @@ class EdgingSummary(BaseModel):
     details: List[EdgingDetail]
 
 
+class StickerLabel(BaseModel):
+    serial_no: str
+    panel_label: str
+    width_mm: float
+    length_mm: float
+    quantity_index: int
+    board_number: Optional[int] = None
+
+    core_type: Optional[str] = None
+    thickness_mm: Optional[int] = None
+    company: Optional[str] = None
+    colour: Optional[str] = None
+
+    edges: str
+    grain_alignment: Optional[str] = None
+
+    logo_url: Optional[str] = None
+    company_name: Optional[str] = None
+
+
+class StickerSheet(BaseModel):
+    total_labels: int
+    labels: List[StickerLabel]
+
+
 class PricingLine(BaseModel):
     item: str
     description: str
@@ -306,6 +331,7 @@ class CuttingResponse(BaseModel):
     optimization: OptimizationSummary
     layouts: List[BoardLayout]
     edging: EdgingSummary
+    stickers: StickerSheet
     boq: BOQSummary
     report_id: str
     generated_at: datetime = Field(default_factory=datetime.utcnow)
@@ -314,4 +340,4 @@ class CuttingResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "healthy"
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    version: str = "2.1.2-render-check"
+    version: str = "2.2.0-stickers"
