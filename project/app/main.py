@@ -270,7 +270,7 @@ async def api_optimize(req: CuttingRequest) -> CuttingResponse:
         },
         optimization=optimization,
         layouts=boards,
-        edging=edgeging_summary if False else edging_summary,
+       edging=edging_summary,
         stickers=stickers,
         boq=boq,
         report_id=report_id,
