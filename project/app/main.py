@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -16,6 +16,8 @@ from app.schemas import (
     CuttingRequest,
     CuttingResponse,
     HealthResponse,
+    StickerLabel,
+    StickerSheet,
 )
 from app.optimizer import run_optimization
 from app.pricing import calculate_pricing
@@ -31,30 +33,59 @@ from app.mpesa import initiate_stk_push
 from app.whatsapp_utils import send_whatsapp_message
 
 logger = logging.getLogger("panelpro")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 
-app = FastAPI(title="PanelPro - Cutting Optimizer")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+IS_PRODUCTION = ENVIRONMENT == "production"
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+DISABLE_DOCS_IN_PRODUCTION = os.getenv("DISABLE_DOCS_IN_PRODUCTION", "false").lower() == "true"
+COMPANY_LOGO_URL = os.getenv("COMPANY_LOGO_URL", "")
+STICKER_COMPANY_NAME = os.getenv("STICKER_COMPANY_NAME", "PanelPro")
+
+docs_url = None if (IS_PRODUCTION and DISABLE_DOCS_IN_PRODUCTION) else "/docs"
+redoc_url = None if (IS_PRODUCTION and DISABLE_DOCS_IN_PRODUCTION) else "/redoc"
+openapi_url = None if (IS_PRODUCTION and DISABLE_DOCS_IN_PRODUCTION) else "/openapi.json"
+
+app = FastAPI(
+    title="PanelPro - Cutting Optimizer",
+    docs_url=docs_url,
+    redoc_url=redoc_url,
+    openapi_url=openapi_url,
+)
 
 _allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
-_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()] if _allowed_origins_env else ["*"]
+if _allowed_origins_env:
+    _origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
+else:
+    _origins = ["*"] if not IS_PRODUCTION else []
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+ORDERS: dict[str, dict[str, Any]] = {}
+PAYMENTS: dict[str, dict[str, Any]] = {}
+PENDING_CHECKOUT: dict[str, str] = {}
+
+
+def require_admin_api_key(x_api_key: Optional[str]) -> None:
+    if not ADMIN_API_KEY:
+        raise HTTPException(status_code=500, detail="ADMIN_API_KEY is not configured")
+
+    if x_api_key != ADMIN_API_KEY:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     logger.error("Validation error on %s: %s", request.url.path, exc.errors())
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
-
-
-ORDERS: dict[str, dict[str, Any]] = {}
-PAYMENTS: dict[str, dict[str, Any]] = {}
-PENDING_CHECKOUT: dict[str, str] = {}
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -157,11 +188,63 @@ def build_boq(
     )
 
 
+def build_stickers(
+    request: CuttingRequest,
+    layouts,
+) -> StickerSheet:
+    labels: list[StickerLabel] = []
+    serial_counter = 1
+    panel_instance_counter: dict[int, int] = {}
+
+    for layout in layouts:
+        for placed in layout.panels:
+            panel = request.panels[placed.panel_index]
+            eff_board = panel.get_effective_board(request.board)
+
+            panel_instance_counter.setdefault(placed.panel_index, 0)
+            panel_instance_counter[placed.panel_index] += 1
+            quantity_index = panel_instance_counter[placed.panel_index]
+
+            edges = "".join(
+                edge[0].upper()
+                for edge, flag in [
+                    ("Top", panel.edging.top),
+                    ("Right", panel.edging.right),
+                    ("Bottom", panel.edging.bottom),
+                    ("Left", panel.edging.left),
+                ]
+                if flag
+            ) or "None"
+
+            labels.append(
+                StickerLabel(
+                    serial_no=f"LBL-{serial_counter:05d}",
+                    panel_label=panel.label or f"Panel {placed.panel_index + 1}",
+                    width_mm=placed.width,
+                    length_mm=placed.length,
+                    quantity_index=quantity_index,
+                    board_number=layout.board_number,
+                    core_type=eff_board.core_type.value,
+                    thickness_mm=int(eff_board.thickness_mm.value),
+                    company=eff_board.company,
+                    colour=eff_board.color_name,
+                    edges=edges,
+                    grain_alignment=panel.alignment.value if panel.alignment else None,
+                    logo_url=COMPANY_LOGO_URL or None,
+                    company_name=STICKER_COMPANY_NAME,
+                )
+            )
+            serial_counter += 1
+
+    return StickerSheet(total_labels=len(labels), labels=labels)
+
+
 @app.post("/api/optimize", response_model=CuttingResponse)
 async def api_optimize(req: CuttingRequest) -> CuttingResponse:
     boards, optimization, edging_summary = run_optimization(req)
     pricing = calculate_pricing(req, optimization, edging_summary.total_meters)
     boq = build_boq(req, optimization, edging_summary, pricing)
+    stickers = build_stickers(req, boards)
 
     report_id = f"RPT-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{datetime.utcnow().microsecond:06d}"
 
@@ -173,7 +256,8 @@ async def api_optimize(req: CuttingRequest) -> CuttingResponse:
         },
         optimization=optimization,
         layouts=boards,
-        edging=edging_summary,
+        edging=edgeging_summary if False else edging_summary,
+        stickers=stickers,
         boq=boq,
         report_id=report_id,
     )
@@ -300,7 +384,13 @@ async def payment_status(order_id: str = Query(...)):
 
 
 @app.post("/api/test-email")
-async def test_email(to: str = Query(..., description="Destination email")):
+async def test_email(
+    to: str = Query(..., description="Destination email"),
+    x_api_key: Optional[str] = Header(default=None),
+):
+    if IS_PRODUCTION:
+        require_admin_api_key(x_api_key)
+
     subject = "PanelPro test email"
     html = "<h1>PanelPro Email Test</h1><p>If you see this, email is working.</p>"
 
@@ -313,14 +403,23 @@ async def test_email(to: str = Query(..., description="Destination email")):
 
 
 @app.post("/api/test-whatsapp")
-async def test_whatsapp(phone: str = Query(..., description="Customer phone, e.g. 2547xxxxxxx")):
+async def test_whatsapp(
+    phone: str = Query(..., description="Customer phone, e.g. 2547xxxxxxx"),
+    x_api_key: Optional[str] = Header(default=None),
+):
+    if IS_PRODUCTION:
+        require_admin_api_key(x_api_key)
+
     msg_id = send_whatsapp_message(
         phone,
         "PanelPro test WhatsApp message. If you see this, WhatsApp Cloud API is working.",
     )
     if msg_id:
         return {"status": "sent", "id": msg_id}
-    return JSONResponse(status_code=500, content={"status": "error", "detail": "Failed to send WhatsApp message"})
+    return JSONResponse(
+        status_code=500,
+        content={"status": "error", "detail": "Failed to send WhatsApp message"},
+    )
 
 
 @app.post("/api/notify/after-payment")
