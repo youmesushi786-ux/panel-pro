@@ -107,9 +107,7 @@ export interface BackendCuttingRequest {
   customer_email?: string;
   customer_phone?: string;
   notes?: string;
-
   board: BoardSelection;
-
   panels: Array<{
     label: string;
     width: number;
@@ -120,15 +118,18 @@ export interface BackendCuttingRequest {
     edging: PanelEdges;
     board?: BoardSelection;
   }>;
-
   stock_sheets: Array<{
     length: number;
     width: number;
     qty: number;
   }>;
-
   options: OptimizationOptions;
-  supply: SupplyMode;
+  supply: {
+    client_supply: boolean;
+    factory_supply: boolean;
+    client_board_qty?: number | null;
+    client_edging_meters?: number | null;
+  };
 }
 
 export interface PlacedPanel {
@@ -146,10 +147,6 @@ export interface PlacedPanel {
 export interface Cut {
   id?: number;
   orientation?: string;
-  type?: string;
-  position?: number;
-  start?: number;
-  end?: number;
   x1?: number;
   y1?: number;
   x2?: number;
@@ -167,6 +164,28 @@ export interface Layout {
   waste_area_mm2: number;
   efficiency_percent: number;
   panel_count: number;
+}
+
+export interface StickerLabel {
+  serial_no: string;
+  panel_label: string;
+  width_mm: number;
+  length_mm: number;
+  quantity_index: number;
+  board_number?: number | null;
+  core_type?: string | null;
+  thickness_mm?: number | null;
+  company?: string | null;
+  colour?: string | null;
+  edges: string;
+  grain_alignment?: string | null;
+  logo_url?: string | null;
+  company_name?: string | null;
+}
+
+export interface StickerSheet {
+  total_labels: number;
+  labels: StickerLabel[];
 }
 
 export interface BOQItem {
@@ -190,28 +209,6 @@ export interface PricingLine {
   unit: string;
   unit_price: number;
   amount: number;
-}
-
-export interface StickerLabel {
-  serial_no: string;
-  panel_label: string;
-  width_mm: number;
-  length_mm: number;
-  quantity_index: number;
-  board_number?: number | null;
-  core_type?: string | null;
-  thickness_mm?: number | null;
-  company?: string | null;
-  colour?: string | null;
-  edges: string;
-  grain_alignment?: string | null;
-  logo_url?: string | null;
-  company_name?: string | null;
-}
-
-export interface StickerSheet {
-  total_labels: number;
-  labels: StickerLabel[];
 }
 
 export interface CuttingResponse {
@@ -287,16 +284,7 @@ export interface CuttingResponse {
       total: number;
       currency: string;
       supplied_by: string;
-      panel_boq: Array<{
-        label?: string;
-        core_type: string;
-        thickness_mm: number;
-        company: string;
-        colour: string;
-        quantity: number;
-        area_m2: number;
-        material_amount: number;
-      }>;
+      panel_boq: any[];
     };
   };
   report_id: string;
