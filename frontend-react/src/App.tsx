@@ -16,9 +16,7 @@ import type {
 
 function App() {
   const [currentStep, setCurrentStep] = useState(1);
-
   const [panels, setPanels] = useState<Panel[]>([]);
-
   const [stockSheets, setStockSheets] = useState<StockSheet[]>([
     { id: '1', length: 2440, width: 1220, quantity: 10 },
   ]);
@@ -57,15 +55,7 @@ function App() {
 
   const addToast = (type: 'success' | 'error' | 'info', message: string) => {
     const id = Date.now().toString();
-    setToasts((prev) => [
-      ...prev,
-      {
-        id,
-        type,
-        message,
-        onClose: () => removeToast(id),
-      },
-    ]);
+    setToasts((prev) => [...prev, { id, type, message, onClose: () => removeToast(id) }]);
   };
 
   const removeToast = (id: string) => {
@@ -112,10 +102,7 @@ function App() {
       setCurrentStep(2);
       addToast('success', 'Optimization completed successfully!');
     } catch (error) {
-      addToast(
-        'error',
-        error instanceof Error ? error.message : 'Optimization failed',
-      );
+      addToast('error', error instanceof Error ? error.message : 'Optimization failed');
     } finally {
       setIsOptimizing(false);
     }
@@ -166,12 +153,8 @@ function App() {
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl p-8 shadow-2xl">
               <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-orange-600 mx-auto mb-4"></div>
-              <p className="text-lg font-semibold text-gray-900">
-                Optimizing layout...
-              </p>
-              <p className="text-sm text-gray-500 mt-2">
-                This may take a moment
-              </p>
+              <p className="text-lg font-semibold text-gray-900">Optimizing layout...</p>
+              <p className="text-sm text-gray-500 mt-2">This may take a moment</p>
             </div>
           </div>
         )}
