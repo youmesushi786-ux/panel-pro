@@ -62,6 +62,11 @@ if _allowed_origins_env:
 else:
     _origins = ["*"] if not IS_PRODUCTION else []
 
+logger.info("ENVIRONMENT=%s", ENVIRONMENT)
+logger.info("IS_PRODUCTION=%s", IS_PRODUCTION)
+logger.info("ALLOWED_ORIGINS raw=%s", _allowed_origins_env)
+logger.info("CORS allow_origins=%s", _origins)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
@@ -256,7 +261,7 @@ async def api_optimize(req: CuttingRequest) -> CuttingResponse:
         },
         optimization=optimization,
         layouts=boards,
-        edging=edgeging_summary if False else edging_summary,
+        edging=edging_summary,
         stickers=stickers,
         boq=boq,
         report_id=report_id,
