@@ -36,11 +36,16 @@ export function StickerPrint({ stickers, projectName }: Props) {
     <section className="sticker-section">
       <div className="sticker-toolbar no-print">
         <div>
-          <h2>Printable Sticker Labels</h2>
-          <p className="sticker-subtitle">Total labels: {stickers.total_labels}</p>
+          <h2 className="text-2xl font-bold text-gray-900">Printable Sticker Labels</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Total labels: {stickers.total_labels}
+          </p>
         </div>
 
-        <button onClick={handlePrint} className="print-btn">
+        <button
+          onClick={handlePrint}
+          className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg font-semibold"
+        >
           Print / Save PDF
         </button>
       </div>
