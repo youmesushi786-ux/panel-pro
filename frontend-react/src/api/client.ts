@@ -15,9 +15,6 @@ const envBase =
 const API_BASE: string =
   (envBase ? envBase.replace(/\/$/, '') : undefined) ?? 'http://127.0.0.1:8000';
 
-/**
- * Convert frontend request shape -> backend FastAPI request shape
- */
 function toBackendCuttingRequest(req: CuttingRequest): BackendCuttingRequest {
   const firstPanelBoard = req.panels[0]?.board;
   if (!firstPanelBoard) {
@@ -73,7 +70,7 @@ function toBackendCuttingRequest(req: CuttingRequest): BackendCuttingRequest {
       factory_supply: req.supply.factory_supply,
       client_board_qty: req.supply.client_board_qty ?? null,
       client_edging_meters: req.supply.client_edging_meters ?? null,
-    } as any,
+    },
   };
 }
 
@@ -158,7 +155,6 @@ export const api = {
     const response = await fetch(
       `${API_BASE}/api/payment/status?order_id=${encodeURIComponent(orderId)}`,
     );
-
     return handleResponse(response);
   },
 
