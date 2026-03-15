@@ -104,6 +104,17 @@ export function StepResults({
             </div>
           </div>
         </div>
+
+        {optimization.warnings && optimization.warnings.length > 0 && (
+          <div className="mt-6 bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+            <h3 className="font-semibold text-yellow-800 mb-2">Warnings</h3>
+            <ul className="list-disc pl-5 text-yellow-700">
+              {optimization.warnings.map((warning, idx) => (
+                <li key={idx}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl shadow-xl p-8">
